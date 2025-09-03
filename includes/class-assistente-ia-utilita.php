@@ -23,7 +23,7 @@ class Assistente_IA_Utilita {
         $ip=self::ottieni_indirizzo_ip();
         $k='assia_rl_'.md5($ip.'|'.$hash_sessione);
         $c=(int)get_transient($k);
-        if($c>=$max){ wp_send_json_error(['messaggio'=>'Hai raggiunto il limite di richieste; riprova tra poco.']); }
+        if($c>=$max){ wp_send_json_error(['messaggio'=>'Hai raggiunto il limite di richieste; riprova tra poco.'], 429); }
         set_transient($k,$c+1,$fin);
     }
 
