@@ -52,6 +52,14 @@ class Assistente_IA_Modello_Vertex {
         $code=wp_remote_retrieve_response_code($res);
         $raw=wp_remote_retrieve_body($res);
         $json=json_decode($raw,true);
+        if(!is_array($json)){
+            Assistente_IA_Diagnostica_Modello::salva([
+                'tipo'=>'generate','endpoint'=>self::crea_endpoint_generate(),'payload'=>$body,
+                'risposta'=>$raw,'http_code'=>$code,'errore'=>'Risposta non valida dal modello',
+                'id_chat'=>$meta['id_chat']??null,'hash_sessione'=>$meta['hash_sessione']??null
+            ]);
+            return ['errore'=>'Risposta non valida dal modello','http'=>$code];
+        }
 
         if(200!==$code){
             $mess=$json['error']['message']??'Errore generazione';
@@ -102,6 +110,14 @@ class Assistente_IA_Modello_Vertex {
         $code=wp_remote_retrieve_response_code($res);
         $raw=wp_remote_retrieve_body($res);
         $json=json_decode($raw,true);
+        if(!is_array($json)){
+            Assistente_IA_Diagnostica_Modello::salva([
+                'tipo'=>'embed','endpoint'=>self::crea_endpoint_embeddings(),'payload'=>$payload,
+                'risposta'=>$raw,'http_code'=>$code,'errore'=>'Risposta non valida dal modello',
+                'id_chat'=>$meta['id_chat']??null,'hash_sessione'=>$meta['hash_sessione']??null
+            ]);
+            return ['errore'=>'Risposta non valida dal modello','http'=>$code];
+        }
 
         if(200!==$code){
             $mess=$json['error']['message']??'Errore embeddings';
