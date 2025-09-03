@@ -116,7 +116,7 @@ class Assistente_IA_Ajax {
     protected function postprocesso_risposta(string $testo): string {
         $testo=trim($testo);
         // Link plain → <a>
-        $testo=preg_replace('#(https?://[\\w\\-\\.\\?\\,\\:/\\#\\&\\%=\\+\\~]+)#','<a href="$1" target="_blank" rel="noopener nofollow">$1</a>',$testo);
+        $testo = wp_make_clickable( esc_html( $testo ) );
 
         // Paragrafi
         $out=''; foreach(explode("\n",$testo) as $r){ $out.='<p>'.wp_kses_post($r).'</p>'; }
