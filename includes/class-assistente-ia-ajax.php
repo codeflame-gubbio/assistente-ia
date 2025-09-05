@@ -25,6 +25,9 @@ class Assistente_IA_Ajax {
         $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
+        if(!Assistente_IA_Utilita::valida_hash_sessione($hash)){
+            wp_send_json_error(['messaggio'=>'Hash sessione non valido']);
+        }
 
         Assistente_IA_Utilita::limita_richieste_utente(get_current_user_id());
 
@@ -51,6 +54,9 @@ class Assistente_IA_Ajax {
         check_ajax_referer('assistente_ia_nonce','nonce');
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($hash)) wp_send_json_error(['messaggio'=>'Hash sessione mancante']);
+        if(!Assistente_IA_Utilita::valida_hash_sessione($hash)){
+            wp_send_json_error(['messaggio'=>'Hash sessione non valido']);
+        }
 
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $m=(int)get_option('assia_messaggi_ui',30);

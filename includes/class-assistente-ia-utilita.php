@@ -42,5 +42,10 @@ class Assistente_IA_Utilita {
         if(strlen($t)<= $n) return $t;
         return substr($t,0,$n-1).'…';
     }
+
+    /** Valida hash sessione esadecimale (64 caratteri) */
+    public static function valida_hash_sessione(string $hash): bool {
+        return (bool) preg_match('/^[a-f0-9]{64}$/i', $hash);
+    }
 }
 
