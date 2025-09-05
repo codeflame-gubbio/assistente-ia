@@ -26,7 +26,7 @@ class Assistente_IA_Ajax {
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
 
-        Assistente_IA_Utilita::limita_richieste_utente($hash);
+        Assistente_IA_Utilita::limita_richieste_utente(get_current_user_id());
 
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $this->salva_messaggio($id_chat,'utente',$messaggio);

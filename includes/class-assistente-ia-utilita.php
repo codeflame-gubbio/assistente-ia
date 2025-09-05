@@ -15,15 +15,16 @@ class Assistente_IA_Utilita {
         return $ip ?: '0.0.0.0';
     }
 
-    /** Rate limit per IP+sessione */
-    public static function limita_richieste_utente(string $hash_sessione): void {
+    /** Rate limit per IP e, se disponibile, ID utente autenticato */
+    public static function limita_richieste_utente(int $id_utente = 0): void {
         $max=(int)get_option('assia_rate_limite_max',8);
         $fin=(int)get_option('assia_rate_limite_finestra_sec',60);
         if($max<=0||$fin<=0){ error_log('Assistente IA: valori rate limit non validi (max='.$max.', fin='.$fin.')'); }
         $max=max(1,$max);
         $fin=max(1,$fin);
         $ip=self::ottieni_indirizzo_ip();
-        $k='assia_rl_'.md5($ip.'|'.$hash_sessione);
+        $id=$ip.'|'.$id_utente;
+        $k='assia_rl_'.md5($id);
         $c=(int)get_transient($k);
         if($c>=$max){ wp_send_json_error(['messaggio'=>'Hai raggiunto il limite di richieste; riprova tra poco.'], 429); }
         set_transient($k,$c+1,$fin);
