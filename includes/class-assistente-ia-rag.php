@@ -15,7 +15,7 @@ class Assistente_IA_RAG {
             return self::schede_to_contesto( $schede );
         }
 
-        $k     = (int) get_option('assia_embeddings_top_k', 3);
+        $k     = max(1, (int) get_option('assia_embeddings_top_k', 3));
         $sigla = get_option('assia_modello_embedding','text-embedding-005');
 
         // 1) Embedding della domanda (log su DB; chat/hash sconosciuti qui)
@@ -30,24 +30,34 @@ class Assistente_IA_RAG {
         }
         $vq = $emb['vettore'];
 
-        // 2) Similarità sui chunks indicizzati
+        // 2) Similarità sui chunks indicizzati (batch per non caricare tutta la tabella)
         global $wpdb; $pref = $wpdb->prefix;
-        $righe = $wpdb->get_results( $wpdb->prepare(
-            "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s",
-            $sigla
-        ), ARRAY_A );
-
+        $batch    = 200;
+        $offset   = 0;
         $punteggi = [];
-        if ( ! empty($righe) ){
-            foreach( $righe as $idx => $r ){
+
+        do {
+            $righe = $wpdb->get_results( $wpdb->prepare(
+                "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s LIMIT %d OFFSET %d",
+                $sigla, $batch, $offset
+            ), ARRAY_A );
+
+            if ( empty($righe) ) { break; }
+
+            foreach( $righe as $r ){
                 $vec = json_decode( $r['embedding'], true );
-                if ( ! is_array($vec) ) continue;
+                if ( ! is_array($vec) ) { continue; }
                 $score = self::coseno($vq, $vec);
-                $punteggi[] = [ 'i'=>$idx, 'score'=>$score, 'testo'=>$r['testo_chunk'] ];
+                $punteggi[] = [ 'score'=>$score, 'testo'=>$r['testo_chunk'] ];
             }
+
             usort( $punteggi, function($a,$b){ return $b['score'] <=> $a['score']; });
-            $punteggi = array_slice( $punteggi, 0, max(1,$k) );
-        }
+            if ( count($punteggi) > $k ) {
+                $punteggi = array_slice( $punteggi, 0, $k );
+            }
+
+            $offset += $batch;
+        } while ( count($righe) === $batch );
 
         $estratti = [];
         foreach( $punteggi as $p ){
