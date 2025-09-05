@@ -206,6 +206,7 @@ class Assistente_IA_RAG {
         $modello   = get_option('assia_modello_embedding','text-embedding-005');
         $avvio     = current_time('mysql');
         $errori    = [];
+        $tot_voci  = 0;
         global $wpdb; $pref = $wpdb->prefix;
 
         $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
@@ -236,25 +237,54 @@ class Assistente_IA_RAG {
         };
 
         // Post/Pagine
-        $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-        foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
-        wp_reset_postdata();
+        $paged = 1; $per_page = 20;
+        do {
+            $q = new WP_Query([
+                'post_type'      => ['post','page'],
+                'post_status'    => 'publish',
+                'posts_per_page' => $per_page,
+                'paged'          => $paged,
+                'fields'         => 'ids'
+            ]);
+            $ids = $q->posts ?? [];
+            if ( empty( $ids ) ) { wp_reset_postdata(); break; }
+            foreach( $ids as $pid ) { $processa('post', (int)$pid); $tot_voci++; }
+            wp_reset_postdata();
+            unset( $q, $ids );
+            gc_collect_cycles();
+            $paged++;
+        } while ( true );
 
         // Prodotti WooCommerce
         if ( self::woo_attivo() ) {
-            $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
-            wp_reset_postdata();
+            $paged = 1;
+            do {
+                $qp = new WP_Query([
+                    'post_type'      => ['product'],
+                    'post_status'    => 'publish',
+                    'posts_per_page' => $per_page,
+                    'paged'          => $paged,
+                    'fields'         => 'ids'
+                ]);
+                $ids = $qp->posts ?? [];
+                if ( empty( $ids ) ) { wp_reset_postdata(); break; }
+                foreach( $ids as $pid ) { $processa('prodotto', (int)$pid); $tot_voci++; }
+                wp_reset_postdata();
+                unset( $qp, $ids );
+                gc_collect_cycles();
+                $paged++;
+            } while ( true );
         }
 
         self::appendi_log_embeddings([
             'avviato_il' => $avvio,
             'completato_il' => current_time('mysql'),
             'modello' => $modello,
-            'tot_voci' => (int)(count($q->posts ?? []) + (self::woo_attivo() ? count($qp->posts ?? []) : 0)),
+            'tot_voci' => $tot_voci,
             'chunks_creati' => $conteggio,
             'errori' => $errori,
         ]);
+        error_log('[Assistente IA] rigenera_indice_post completato.');
         return $conteggio;
     }
 
