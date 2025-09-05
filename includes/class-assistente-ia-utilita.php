@@ -19,7 +19,9 @@ class Assistente_IA_Utilita {
     public static function limita_richieste_utente(string $hash_sessione): void {
         $max=(int)get_option('assia_rate_limite_max',8);
         $fin=(int)get_option('assia_rate_limite_finestra_sec',60);
-        if($max<=0||$fin<=0) return;
+        if($max<=0||$fin<=0){ error_log('Assistente IA: valori rate limit non validi (max='.$max.', fin='.$fin.')'); }
+        $max=max(1,$max);
+        $fin=max(1,$fin);
         $ip=self::ottieni_indirizzo_ip();
         $k='assia_rl_'.md5($ip.'|'.$hash_sessione);
         $c=(int)get_transient($k);
