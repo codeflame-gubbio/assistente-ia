@@ -74,7 +74,14 @@ class Assistente_IA_Ajax {
     public function embeddings_step(){
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
-        $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
+        $batch = 5;
+        if ( isset($_POST['batch']) ) {
+            $richiesto = (int) $_POST['batch'];
+            if ( $richiesto > 20 ) {
+                wp_send_json_error(['messaggio' => 'Batch massimo 20']);
+            }
+            $batch = min(20, max(1, $richiesto));
+        }
         $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
         if ( isset($job['errore']) ) wp_send_json_error( $job );
         wp_send_json_success( $job );
