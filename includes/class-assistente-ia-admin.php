@@ -58,7 +58,11 @@ public function aggiungi_menu(){
             // nuove:
             'assia_registro_modello_attivo','assia_ruolo_sistema'
         ] as $o) {
-            register_setting('assia_opt',$o);
+            if ( $o === 'assia_credenziali_base64' ) {
+                register_setting( 'assia_opt', $o, [ 'sanitize_callback' => ['Assistente_IA_Token', 'valida_raw_credenziali'] ] );
+            } else {
+                register_setting('assia_opt',$o);
+            }
         }
     }
 

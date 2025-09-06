@@ -7,6 +7,38 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  */
 class Assistente_IA_Token {
 
+    /**
+     * Verifica che la stringa passata sia JSON valido oppure Base64 che decodifica in JSON valido.
+     * Ritorna la stringa ripulita (senza spazi per il Base64) oppure WP_Error in caso di input non valido.
+     */
+    public static function valida_raw_credenziali( string $raw ) {
+        $raw = trim( $raw );
+        if ( $raw === '' ) {
+            return '';
+        }
+
+        // JSON in chiaro
+        if ( strpos( ltrim( $raw ), '{' ) === 0 ) {
+            json_decode( $raw );
+            if ( json_last_error() !== JSON_ERROR_NONE ) {
+                return new WP_Error( 'assia_credenziali_base64', 'JSON non valido.' );
+            }
+            return $raw;
+        }
+
+        // Base64 -> JSON
+        $b64 = preg_replace( '/\s+/', '', $raw );
+        $decoded = base64_decode( $b64, true );
+        if ( $decoded === false ) {
+            return new WP_Error( 'assia_credenziali_base64', 'Base64 non valido.' );
+        }
+        json_decode( $decoded );
+        if ( json_last_error() !== JSON_ERROR_NONE ) {
+            return new WP_Error( 'assia_credenziali_base64', 'Il Base64 non contiene un JSON valido.' );
+        }
+        return $b64;
+    }
+
     /** Legge il JSON del service account (in chiaro o Base64) dalle opzioni */
     protected static function leggi_config_service_account(): array {
         $raw = get_option('assia_credenziali_base64','');
@@ -76,6 +108,12 @@ class Assistente_IA_Token {
 
     /** Check veloce credenziali */
     public static function diagnostica_credenziali(): array {
+        $raw = get_option('assia_credenziali_base64','');
+        $val = self::valida_raw_credenziali( $raw );
+        if ( is_wp_error( $val ) ) {
+            return ['ok'=>false,'note'=>$val->get_error_message()];
+        }
+
         $cfg=self::leggi_config_service_account();
         if(empty($cfg)) return ['ok'=>false,'note'=>'Credenziali non presenti o non valide (Base64/JSON).'];
         $manc=[]; foreach(['type','project_id','client_email','private_key'] as $k){ if(empty($cfg[$k])) $manc[]=$k; }
