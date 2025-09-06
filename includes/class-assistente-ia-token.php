@@ -7,9 +7,18 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  */
 class Assistente_IA_Token {
 
-    /** Legge il JSON del service account (in chiaro o Base64) dalle opzioni */
+    /**
+     * Legge il JSON del service account (in chiaro o Base64) da variabili
+     * d'ambiente o da un file esterno.
+     */
     protected static function leggi_config_service_account(): array {
-        $raw = get_option('assia_credenziali_base64','');
+        $raw = getenv('ASSIA_SERVICE_ACCOUNT');
+        if ( empty($raw) ) {
+            $path = getenv('ASSIA_SERVICE_ACCOUNT_FILE');
+            if ( $path && is_readable($path) ) {
+                $raw = file_get_contents($path);
+            }
+        }
         if ( empty($raw) ) { return []; }
 
         // Se inizia con "{", lo tratto come JSON in chiaro
@@ -77,7 +86,7 @@ class Assistente_IA_Token {
     /** Check veloce credenziali */
     public static function diagnostica_credenziali(): array {
         $cfg=self::leggi_config_service_account();
-        if(empty($cfg)) return ['ok'=>false,'note'=>'Credenziali non presenti o non valide (Base64/JSON).'];
+        if(empty($cfg)) return ['ok'=>false,'note'=>'Credenziali non presenti o non valide (variabili d\'ambiente/file).'];
         $manc=[]; foreach(['type','project_id','client_email','private_key'] as $k){ if(empty($cfg[$k])) $manc[]=$k; }
         if($manc) return ['ok'=>false,'note'=>'Campi mancanti: '.implode(', ',$manc)];
         return ['ok'=>true,'note'=>'Credenziali lette correttamente per '.$cfg['client_email']];

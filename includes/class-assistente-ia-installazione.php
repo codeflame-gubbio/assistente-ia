@@ -70,7 +70,6 @@ class Assistente_IA_Installazione {
             'assia_localita' => 'us-central1',
             'assia_modello' => 'gemini-2.0-flash-001',
             'assia_modello_embedding' => 'text-embedding-005',
-            'assia_credenziali_base64' => '', // JSON in chiaro O Base64 (auto-rilevato)
             'assia_obiettivo' => 'Sei un assistente utile e preciso.',
             'assia_avviso' => 'Le risposte sono fornite a scopo informativo.',
             'assia_temperature' => 0.2,
