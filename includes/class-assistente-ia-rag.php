@@ -71,8 +71,9 @@ class Assistente_IA_RAG {
         $parole = preg_split('/\s+/', trim($domanda));
         $short  = ( is_array($parole) && count($parole) <= 3 );
         $best   = isset($punteggi[0]['score']) ? (float)$punteggi[0]['score'] : 0.0;
+        $soglia_fallback = (float) get_option('assia_rag_fallback_threshold', 0.20);
 
-        if ( empty($estratti) || $short || $best < 0.20 ){
+        if ( empty($estratti) || $short || $best < $soglia_fallback ){
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             // concateniamo i risultati del fallback agli estratti (senza duplicare)
             $estratti_fb = self::schede_to_array( $schede );

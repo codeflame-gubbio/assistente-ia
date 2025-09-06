@@ -52,6 +52,7 @@ public function aggiungi_menu(){
             'assia_progetto_id','assia_localita','assia_modello','assia_modello_embedding','assia_credenziali_base64',
             'assia_obiettivo','assia_avviso','assia_temperature','assia_top_p','assia_top_k','assia_max_token',
             'assia_safety_soglie','assia_attiva_google_search','assia_attiva_embeddings','assia_embeddings_top_k',
+            'assia_rag_fallback_threshold', // Aggiunto
             'assia_embeddings_solo_migliori','assia_turni_modello','assia_messaggi_ui','assia_ttl_giorni',
             'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione',
             // nuove:
@@ -123,6 +124,19 @@ public function aggiungi_menu(){
                 } ?>
             </td></tr>
             <tr><th>Google Search</th><td><select name="assia_attiva_google_search"><option value="no" <?php selected(get_option('assia_attiva_google_search'),'no');?>>No</option><option value="si" <?php selected(get_option('assia_attiva_google_search'),'si');?>>Sì</option></select></td></tr>
+        </table>
+
+        <h2>RAG & Embeddings</h2>
+        <table class="form-table">
+            <tr><th>Attiva Embeddings (RAG)</th><td><select name="assia_attiva_embeddings"><option value="no" <?php selected(get_option('assia_attiva_embeddings'),'no');?>>No</option><option value="si" <?php selected(get_option('assia_attiva_embeddings','si'),'si');?>>Sì</option></select></td></tr>
+            <tr><th>Top-K chunks</th><td><input type="number" name="assia_embeddings_top_k" value="<?php echo esc_attr(get_option('assia_embeddings_top_k',3)); ?>"></td></tr>
+            <tr>
+                <th>Soglia fallback keyword</th>
+                <td>
+                    <input type="number" step="0.01" min="0" max="1" name="assia_rag_fallback_threshold" value="<?php echo esc_attr(get_option('assia_rag_fallback_threshold', 0.20)); ?>">
+                    <p class="description">Soglia di similarità sotto la quale la ricerca RAG viene integrata da una ricerca keyword (es. 0.20). Utile per domande brevi o ambigue.</p>
+                </td>
+            </tr>
         </table>
 
         <h2>Widget chat</h2>
