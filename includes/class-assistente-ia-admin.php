@@ -49,7 +49,7 @@ public function aggiungi_menu(){
 
     public function registra_impostazioni(){
         foreach([
-            'assia_progetto_id','assia_localita','assia_modello','assia_modello_embedding','assia_credenziali_base64',
+            'assia_progetto_id','assia_localita','assia_modello','assia_modello_embedding',
             'assia_obiettivo','assia_avviso','assia_temperature','assia_top_p','assia_top_k','assia_max_token',
             'assia_safety_soglie','assia_attiva_google_search','assia_attiva_embeddings','assia_embeddings_top_k',
             'assia_rag_fallback_threshold', // Aggiunto
@@ -89,10 +89,9 @@ public function aggiungi_menu(){
             <tr><th>Modello</th><td><input name="assia_modello" class="regular-text" value="<?php echo esc_attr(get_option('assia_modello')); ?>"></td></tr>
             <tr><th>Modello Embedding</th><td><input name="assia_modello_embedding" class="regular-text" value="<?php echo esc_attr(get_option('assia_modello_embedding')); ?>"></td></tr>
             <tr>
-                <th>Credenziali (JSON o Base64)</th>
+                <th>Credenziali</th>
                 <td>
-                    <textarea name="assia_credenziali_base64" rows="4" class="large-text" placeholder="Incolla il JSON del service account OPPURE il Base64"><?php echo esc_textarea(get_option('assia_credenziali_base64')); ?></textarea>
-                    <p class="description">Il plugin riconosce automaticamente il formato (JSON in chiaro <strong>o</strong> Base64).</p>
+                    <p class="description">Le credenziali del service account devono essere fornite tramite variabile d'ambiente <code>ASSIA_SERVICE_ACCOUNT</code> (contenente il JSON o Base64) oppure specificando un file nel percorso indicato da <code>ASSIA_SERVICE_ACCOUNT_FILE</code>. Il plugin non salva più le credenziali nel database.</p>
                 </td>
             </tr>
         </table>
