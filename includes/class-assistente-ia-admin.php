@@ -413,9 +413,16 @@ public function aggiungi_menu(){
         $cred = Assistente_IA_Token::diagnostica_credenziali();
         $esiti[] = [ 'titolo'=>'Lettura credenziali (JSON/Base64)', 'ok'=>(bool)$cred['ok'], 'messaggio'=>$cred['note'] ];
 
-        $token = Assistente_IA_Token::genera_token_accesso();
+        $token = Assistente_IA_Token::ottieni_token_accesso();
         $ok_token = ! empty($token);
-        $esiti[] = [ 'titolo'=>'Richiesta token OAuth2', 'ok'=>$ok_token, 'messaggio'=> $ok_token ? 'Token ottenuto correttamente.' : 'Errore nel generare il token. Verifica service account (ruolo aiplatform.user) e API Vertex.' ];
+        $info_cache = get_transient('assia_token_gemini');
+        if ( $ok_token && is_array($info_cache) && !empty($info_cache['expires_at']) ) {
+            $ttl = max(0, (int)$info_cache['expires_at'] - time());
+            $msg = 'Token ottenuto correttamente (cache). Scade tra '.$ttl.' secondi.';
+        } else {
+            $msg = $ok_token ? 'Token ottenuto correttamente.' : 'Errore nel generare il token. Verifica service account (ruolo aiplatform.user) e API Vertex.';
+        }
+        $esiti[] = [ 'titolo'=>'Richiesta token OAuth2', 'ok'=>$ok_token, 'messaggio'=> $msg ];
 
         $gen = $ok_token ? Assistente_IA_Modello_Vertex::genera_testo('Scrivi solo: OK') : ['errore'=>'Token mancante'];
         if ( empty($gen['errore']) ) {
