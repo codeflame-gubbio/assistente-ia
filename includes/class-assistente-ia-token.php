@@ -44,11 +44,13 @@ class Assistente_IA_Token {
         return $cfg;
     }
 
-    /** Restituisce un token valido (con cache in opzione) */
+    /** Restituisce un token valido (con cache non persistente) */
     public static function ottieni_token_accesso(): string {
-        $s=get_option('assia_token_gemini');
-        if(is_array($s)&&!empty($s['access_token'])&&!empty($s['expires_at'])){
-            if(time() < (int)$s['expires_at']-60){ return $s['access_token']; }
+        $s = get_transient('assia_token_gemini');
+        if (is_array($s) && !empty($s['access_token']) && !empty($s['expires_at'])) {
+            if (time() < (int) $s['expires_at'] - 60) {
+                return $s['access_token'];
+            }
         }
         return self::genera_token_accesso();
     }
@@ -79,7 +81,7 @@ class Assistente_IA_Token {
         $body=json_decode(wp_remote_retrieve_body($res),true);
         if(200!==$code||empty($body['access_token'])) return '';
         $token=$body['access_token']; $exp=$now+(int)($body['expires_in']??3600);
-        update_option('assia_token_gemini',['access_token'=>$token,'expires_at'=>$exp]);
+        set_transient('assia_token_gemini',[ 'access_token'=>$token, 'expires_at'=>$exp ], max(1,$exp-$now));
         return $token;
     }
 
