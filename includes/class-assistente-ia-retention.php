@@ -12,7 +12,7 @@ class Assistente_IA_Retention {
         $limite = gmdate('Y-m-d H:i:s', time() - $giorni * DAY_IN_SECONDS);
         global $wpdb; $pref = $wpdb->prefix;
         $wpdb->query( $wpdb->prepare("DELETE FROM {$pref}assistente_ia_messaggi WHERE creato_il < %s", $limite) );
-        $wpdb->query( $wpdb->prepare("DELETE FROM {$pref}assistente_ia_chat WHERE creato_il < %s", $limite) );
+        $wpdb->query( $wpdb->prepare("DELETE FROM {$pref}assistente_ia_chat WHERE COALESCE(ultimo_aggiornamento, data_creazione) < %s", $limite) );
         $wpdb->query( $wpdb->prepare("DELETE FROM {$pref}assistente_ia_diag_modello WHERE creato_il < %s", $limite) );
     }
 }
