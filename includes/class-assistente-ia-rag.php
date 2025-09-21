@@ -74,29 +74,32 @@ class Assistente_IA_RAG {
 
     /** Prepara un job di indicizzazione: post/pagine + (se presente) prodotti WooCommerce */
     public static function prepara_job_indicizzazione(): array {
-        // Post/Pagine
-        $q = new WP_Query([
-            'post_type'=>['post','page'],
-            'post_status'=>'publish',
-            'posts_per_page'=>-1,
-            'fields'=>'ids'
-        ]);
         $voci = [];
-        foreach( ($q->posts ?? []) as $pid ){
-            $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ];
+
+        // ARTICOLI (post)
+        $post_scope = get_option('assia_rag_post_scope','tutti');
+        $post_ids   = array_map('intval', (array)get_option('assia_rag_post_ids',[]));
+        if ( $post_scope === 'specifici' && ! empty($post_ids) ) {
+            foreach($post_ids as $pid){ $voci[] = [ 'fonte'=>'post', 'id'=>$pid ]; }
+        } else {
+            $q = new WP_Query([ 'post_type'=>'post', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            foreach( ($q->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ]; }
         }
 
-        // Prodotti WooCommerce (se attivo)
+        // PAGINE
+        $page_scope = get_option('assia_rag_page_scope','tutti');
+        $page_ids   = array_map('intval', (array)get_option('assia_rag_page_ids',[]));
+        if ( $page_scope === 'specifici' && ! empty($page_ids) ) {
+            foreach($page_ids as $pid){ $voci[] = [ 'fonte'=>'post', 'id'=>$pid ]; }
+        } else {
+            $q2 = new WP_Query([ 'post_type'=>'page', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            foreach( ($q2->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ]; }
+        }
+
+        // PRODOTTI WooCommerce → sempre tutti (se attivo)
         if ( self::woo_attivo() ) {
-            $qp = new WP_Query([
-                'post_type'=>['product'],
-                'post_status'=>'publish',
-                'posts_per_page'=>-1,
-                'fields'=>'ids'
-            ]);
-            foreach( ($qp->posts ?? []) as $pid ){
-                $voci[] = [ 'fonte'=>'prodotto', 'id'=>(int)$pid ];
-            }
+            $qp = new WP_Query([ 'post_type'=>'product', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            foreach( ($qp->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'prodotto', 'id'=>(int)$pid ]; }
         }
 
         $job = [
@@ -105,7 +108,7 @@ class Assistente_IA_RAG {
             'indice' => 0,
             'creati' => 0,
             'modello' => get_option('assia_modello_embedding','text-embedding-005'),
-            'voci' => $voci, // ← ogni voce ha fonte+id
+            'voci' => $voci,
             'avviato_il' => current_time('mysql'),
             'completato_il' => null,
             'errori' => [],
@@ -210,39 +213,49 @@ class Assistente_IA_RAG {
 
         $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
             if ( $pid <= 0 ) return;
-
-            // Cancella vecchi embeddings
             $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$pref}assistente_ia_embeddings WHERE fonte=%s AND id_riferimento=%d AND modello=%s",
                 $fonte, $pid, $modello
             ) );
-
             $testo = ( $fonte === 'prodotto' )
                 ? Assistente_IA_RAG::costruisci_testo_prodotto( $pid )
                 : Assistente_IA_RAG::testo_da_post( $pid );
-
             if ( ! $testo ) return;
-
             $chunks = Assistente_IA_RAG::spezza_testo( $testo, 800 );
             $indice = 0;
             foreach( $chunks as $ch ){
-                $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [
-                    'id_chat' => null, 'hash_sessione' => null
-                ] );
+                $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [ 'id_chat'=>null, 'hash_sessione'=>null ] );
                 if ( empty($emb['vettore']) ) { $errori[] = "Embedding vuoto per {$fonte} {$pid}"; continue; }
                 Assistente_IA_RAG::salva_embedding( $fonte, $pid, $indice++, $ch, $emb['vettore'], $modello );
                 $conteggio++;
             }
         };
 
-        // Post/Pagine
-        $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-        foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
-        wp_reset_postdata();
+        // ARTICOLI (post)
+        $post_scope = get_option('assia_rag_post_scope','tutti');
+        $post_ids   = array_map('intval', (array)get_option('assia_rag_post_ids',[]));
+        if ( $post_scope === 'specifici' && ! empty($post_ids) ) {
+            foreach($post_ids as $pid){ $processa('post', (int)$pid); }
+        } else {
+            $q = new WP_Query([ 'post_type'=>'post', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
+            wp_reset_postdata();
+        }
 
-        // Prodotti WooCommerce
+        // PAGINE
+        $page_scope = get_option('assia_rag_page_scope','tutti');
+        $page_ids   = array_map('intval', (array)get_option('assia_rag_page_ids',[]));
+        if ( $page_scope === 'specifici' && ! empty($page_ids) ) {
+            foreach($page_ids as $pid){ $processa('post', (int)$pid); }
+        } else {
+            $q2 = new WP_Query([ 'post_type'=>'page', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            foreach( ($q2->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
+            wp_reset_postdata();
+        }
+
+        // PRODOTTI WooCommerce
         if ( self::woo_attivo() ) {
-            $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            $qp = new WP_Query([ 'post_type'=>'product', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
             foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
             wp_reset_postdata();
         }
@@ -251,7 +264,7 @@ class Assistente_IA_RAG {
             'avviato_il' => $avvio,
             'completato_il' => current_time('mysql'),
             'modello' => $modello,
-            'tot_voci' => (int)(count($q->posts ?? []) + (self::woo_attivo() ? count($qp->posts ?? []) : 0)),
+            'tot_voci' => (int)$conteggio,
             'chunks_creati' => $conteggio,
             'errori' => $errori,
         ]);

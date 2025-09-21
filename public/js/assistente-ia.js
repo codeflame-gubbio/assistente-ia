@@ -53,20 +53,13 @@
             hash_sessione: ottieni_o_crea_hash_sessione(),
             post_id: AssistenteIA.currentPost,
             nonce: AssistenteIA.nonce
-        }).done(function(resp){
+        }, function(resp){
             rimuovi_preloader();
             if(!resp||!resp.success){
                 appendi_messaggio('assistente','<em>Si è verificato un errore. '+(resp&&resp.data&&resp.data.messaggio?resp.data.messaggio:'')+'</em>');
                 return;
             }
             appendi_messaggio('assistente', resp.data.risposta_html);
-        }).fail(function(xhr){
-            rimuovi_preloader();
-            var msg='Si è verificato un errore.';
-            if(xhr.status===429){
-                msg=(xhr.responseJSON&&xhr.responseJSON.data&&xhr.responseJSON.data.messaggio)?xhr.responseJSON.data.messaggio:'Hai raggiunto il limite di richieste; riprova tra poco.';
-            }
-            appendi_messaggio('assistente','<em>'+msg+'</em>');
         });
     }
 
