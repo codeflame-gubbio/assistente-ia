@@ -65,4 +65,23 @@ public static function costruisci_prompt(int $id_chat, string $domanda): string 
             ],[ 'id_chat'=>$id_chat ]);
         }
     }
+
+
+    /** Costruisce il prompt e aggiunge il contesto della pagina corrente (post_id) se presente */
+    public static function costruisci_prompt_con_post( int $id_chat, string $domanda, int $post_id = 0 ): string {
+        $base = self::costruisci_prompt($id_chat, $domanda);
+        if($post_id){
+            $p = get_post($post_id);
+            if($p && $p->post_status==='publish'){
+                $titolo = get_the_title($post_id);
+                $contenuto = wp_strip_all_tags( get_post_field('post_content',$post_id) );
+                $contenuto = preg_replace('/\s+/', ' ', $contenuto);
+                $contenuto = trim($contenuto);
+                $estratti = 'Titolo: '. $titolo ."\nTesto: ". substr($contenuto,0,1200);
+                $base .= "\n\n---\n\nContesto pagina corrente:\n" . $estratti;
+            }
+        }
+        return $base;
+    }
+    
 }

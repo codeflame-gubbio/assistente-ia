@@ -31,7 +31,7 @@ class Assistente_IA_Ajax {
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $this->salva_messaggio($id_chat,'utente',$messaggio);
 
-        $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
+        $prompt = method_exists('Assistente_IA_Prompt','costruisci_prompt_con_post') ? Assistente_IA_Prompt::costruisci_prompt_con_post($id_chat,$messaggio, isset($post_id)?$post_id:0) : Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
         $res=Assistente_IA_Modello_Vertex::genera_testo($prompt, [
     'id_chat'       => $id_chat,
     'hash_sessione' => $hash,
@@ -66,7 +66,7 @@ class Assistente_IA_Ajax {
     public function embeddings_avvia(){
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
-        $job = Assistente_IA_RAG::prepara_job_indicizzazione();
+        $job = class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::prepara_job_indicizzazione() : class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::prepara_job_indicizzazione() : Assistente_IA_RAG::prepara_job_indicizzazione();
         wp_send_json_success( $job );
     }
 
@@ -75,7 +75,7 @@ class Assistente_IA_Ajax {
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
         $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
-        $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
+        $job = class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::esegui_job_passaggio : class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::esegui_job_passaggio : Assistente_IA_RAG::esegui_job_passaggio( $batch );
         if ( isset($job['errore']) ) wp_send_json_error( $job );
         wp_send_json_success( $job );
     }
@@ -84,7 +84,7 @@ class Assistente_IA_Ajax {
     public function embeddings_stato(){
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
-        $job = Assistente_IA_RAG::stato_job();
+        $job = class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::stato_job() : class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::stato_job() : Assistente_IA_RAG::stato_job();
         wp_send_json_success( $job );
     }
 
