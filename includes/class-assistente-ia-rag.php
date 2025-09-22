@@ -42,7 +42,14 @@ class Assistente_IA_RAG {
             foreach( $righe as $idx => $r ){
                 $vec = json_decode( $r['embedding'], true );
                 if ( ! is_array($vec) ) continue;
-                $score = self::coseno($vq, $vec);
+                if (!is_array($vec)) { continue; }
+if (count($vq) !== count($vec)) {
+    $errori[] = "Dimensione vettore incompatibile per chunk";
+    continue;
+}
+$vq = array_map('floatval', $vq);
+$vec = array_map('floatval', $vec);
+$score = self::coseno($vq, $vec);
                 $punteggi[] = [ 'i'=>$idx, 'score'=>$score, 'testo'=>$r['testo_chunk'] ];
             }
             usort( $punteggi, function($a,$b){ return $b['score'] <=> $a['score']; });
@@ -120,7 +127,7 @@ class Assistente_IA_RAG {
     /** Esegue N voci per step (AJAX), salva embeddings e aggiorna progresso */
     public static function esegui_job_passaggio( int $batch = 5 ): array {
         $job = get_transient('assia_job_embeddings');
-        if ( ! is_array($job) ) { return [ 'errore' => 'Nessun job attivo' ]; }
+        if ( ! is_array($job) ) { return [ 'errori'=>$errori, 'errore' => 'Nessun job attivo' ]; }
         $job['stato'] = 'in_corso';
         $tot = (int)$job['totale'];
         $i   = (int)$job['indice'];
@@ -411,4 +418,8 @@ class Assistente_IA_RAG {
         $den = (sqrt($na)*sqrt($nb));
         return $den>0 ? ($dot/$den) : 0.0;
     }
+
+        } finally {
+            delete_transient($lock_key);
+        }
 }

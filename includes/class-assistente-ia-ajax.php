@@ -24,7 +24,6 @@ class Assistente_IA_Ajax {
 
         $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
-        $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
 
         Assistente_IA_Utilita::limita_richieste_utente($hash);
@@ -32,7 +31,7 @@ class Assistente_IA_Ajax {
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $this->salva_messaggio($id_chat,'utente',$messaggio);
 
-        $prompt = method_exists('Assistente_IA_Prompt','costruisci_prompt_con_post') ? Assistente_IA_Prompt::costruisci_prompt_con_post($id_chat,$messaggio,$post_id) : Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
+        $prompt = method_exists('Assistente_IA_Prompt','costruisci_prompt_con_post') ? Assistente_IA_Prompt::costruisci_prompt_con_post($id_chat,$messaggio, isset($post_id)?$post_id:0) : Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
         $res=Assistente_IA_Modello_Vertex::genera_testo($prompt, [
     'id_chat'       => $id_chat,
     'hash_sessione' => $hash,
@@ -76,7 +75,7 @@ class Assistente_IA_Ajax {
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
         $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
-        $job = class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::esegui_job_passaggio($batch) : Assistente_IA_RAG::esegui_job_passaggio($batch);
+        $job = class_exists('Assistente_IA_RAG_Paged') ? Assistente_IA_RAG_Paged::esegui_job_passaggio : Assistente_IA_RAG::esegui_job_passaggio( $batch );
         if ( isset($job['errore']) ) wp_send_json_error( $job );
         wp_send_json_success( $job );
     }

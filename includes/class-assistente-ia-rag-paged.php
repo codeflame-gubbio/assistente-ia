@@ -42,4 +42,8 @@ class Assistente_IA_RAG_Paged {
         $perc = $st['totale']>0 ? round(($st['offset']/$st['totale'])*100,1) : 100;
         return ['indice'=>$st['offset'],'totale'=>$st['totale'],'creati'=>$st['creati'],'stato'=>$st['stato'],'percentuale'=>$perc];
     }
+
+        } finally {
+            delete_transient($lock_key);
+        }
 }
