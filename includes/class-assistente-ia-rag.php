@@ -42,14 +42,7 @@ class Assistente_IA_RAG {
             foreach( $righe as $idx => $r ){
                 $vec = json_decode( $r['embedding'], true );
                 if ( ! is_array($vec) ) continue;
-                if (!is_array($vec)) { continue; }
-if (count($vq) !== count($vec)) {
-    $errori[] = "Dimensione vettore incompatibile per chunk";
-    continue;
-}
-$vq = array_map('floatval', $vq);
-$vec = array_map('floatval', $vec);
-$score = self::coseno($vq, $vec);
+                $score = self::coseno($vq, $vec);
                 $punteggi[] = [ 'i'=>$idx, 'score'=>$score, 'testo'=>$r['testo_chunk'] ];
             }
             usort( $punteggi, function($a,$b){ return $b['score'] <=> $a['score']; });
@@ -81,32 +74,29 @@ $score = self::coseno($vq, $vec);
 
     /** Prepara un job di indicizzazione: post/pagine + (se presente) prodotti WooCommerce */
     public static function prepara_job_indicizzazione(): array {
+        // Post/Pagine
+        $q = new WP_Query([
+            'post_type'=>['post','page'],
+            'post_status'=>'publish',
+            'posts_per_page'=>-1,
+            'fields'=>'ids'
+        ]);
         $voci = [];
-
-        // ARTICOLI (post)
-        $post_scope = get_option('assia_rag_post_scope','tutti');
-        $post_ids   = array_map('intval', (array)get_option('assia_rag_post_ids',[]));
-        if ( $post_scope === 'specifici' && ! empty($post_ids) ) {
-            foreach($post_ids as $pid){ $voci[] = [ 'fonte'=>'post', 'id'=>$pid ]; }
-        } else {
-            $q = new WP_Query([ 'post_type'=>'post', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($q->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ]; }
+        foreach( ($q->posts ?? []) as $pid ){
+            $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ];
         }
 
-        // PAGINE
-        $page_scope = get_option('assia_rag_page_scope','tutti');
-        $page_ids   = array_map('intval', (array)get_option('assia_rag_page_ids',[]));
-        if ( $page_scope === 'specifici' && ! empty($page_ids) ) {
-            foreach($page_ids as $pid){ $voci[] = [ 'fonte'=>'post', 'id'=>$pid ]; }
-        } else {
-            $q2 = new WP_Query([ 'post_type'=>'page', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($q2->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ]; }
-        }
-
-        // PRODOTTI WooCommerce → sempre tutti (se attivo)
+        // Prodotti WooCommerce (se attivo)
         if ( self::woo_attivo() ) {
-            $qp = new WP_Query([ 'post_type'=>'product', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($qp->posts ?? []) as $pid ){ $voci[] = [ 'fonte'=>'prodotto', 'id'=>(int)$pid ]; }
+            $qp = new WP_Query([
+                'post_type'=>['product'],
+                'post_status'=>'publish',
+                'posts_per_page'=>-1,
+                'fields'=>'ids'
+            ]);
+            foreach( ($qp->posts ?? []) as $pid ){
+                $voci[] = [ 'fonte'=>'prodotto', 'id'=>(int)$pid ];
+            }
         }
 
         $job = [
@@ -115,7 +105,7 @@ $score = self::coseno($vq, $vec);
             'indice' => 0,
             'creati' => 0,
             'modello' => get_option('assia_modello_embedding','text-embedding-005'),
-            'voci' => $voci,
+            'voci' => $voci, // ← ogni voce ha fonte+id
             'avviato_il' => current_time('mysql'),
             'completato_il' => null,
             'errori' => [],
@@ -127,7 +117,7 @@ $score = self::coseno($vq, $vec);
     /** Esegue N voci per step (AJAX), salva embeddings e aggiorna progresso */
     public static function esegui_job_passaggio( int $batch = 5 ): array {
         $job = get_transient('assia_job_embeddings');
-        if ( ! is_array($job) ) { return [ 'errori'=>$errori, 'errore' => 'Nessun job attivo' ]; }
+        if ( ! is_array($job) ) { return [ 'errore' => 'Nessun job attivo' ]; }
         $job['stato'] = 'in_corso';
         $tot = (int)$job['totale'];
         $i   = (int)$job['indice'];
@@ -220,49 +210,39 @@ $score = self::coseno($vq, $vec);
 
         $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
             if ( $pid <= 0 ) return;
+
+            // Cancella vecchi embeddings
             $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$pref}assistente_ia_embeddings WHERE fonte=%s AND id_riferimento=%d AND modello=%s",
                 $fonte, $pid, $modello
             ) );
+
             $testo = ( $fonte === 'prodotto' )
                 ? Assistente_IA_RAG::costruisci_testo_prodotto( $pid )
                 : Assistente_IA_RAG::testo_da_post( $pid );
+
             if ( ! $testo ) return;
+
             $chunks = Assistente_IA_RAG::spezza_testo( $testo, 800 );
             $indice = 0;
             foreach( $chunks as $ch ){
-                $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [ 'id_chat'=>null, 'hash_sessione'=>null ] );
+                $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [
+                    'id_chat' => null, 'hash_sessione' => null
+                ] );
                 if ( empty($emb['vettore']) ) { $errori[] = "Embedding vuoto per {$fonte} {$pid}"; continue; }
                 Assistente_IA_RAG::salva_embedding( $fonte, $pid, $indice++, $ch, $emb['vettore'], $modello );
                 $conteggio++;
             }
         };
 
-        // ARTICOLI (post)
-        $post_scope = get_option('assia_rag_post_scope','tutti');
-        $post_ids   = array_map('intval', (array)get_option('assia_rag_post_ids',[]));
-        if ( $post_scope === 'specifici' && ! empty($post_ids) ) {
-            foreach($post_ids as $pid){ $processa('post', (int)$pid); }
-        } else {
-            $q = new WP_Query([ 'post_type'=>'post', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
-            wp_reset_postdata();
-        }
+        // Post/Pagine
+        $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+        foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
+        wp_reset_postdata();
 
-        // PAGINE
-        $page_scope = get_option('assia_rag_page_scope','tutti');
-        $page_ids   = array_map('intval', (array)get_option('assia_rag_page_ids',[]));
-        if ( $page_scope === 'specifici' && ! empty($page_ids) ) {
-            foreach($page_ids as $pid){ $processa('post', (int)$pid); }
-        } else {
-            $q2 = new WP_Query([ 'post_type'=>'page', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($q2->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
-            wp_reset_postdata();
-        }
-
-        // PRODOTTI WooCommerce
+        // Prodotti WooCommerce
         if ( self::woo_attivo() ) {
-            $qp = new WP_Query([ 'post_type'=>'product', 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
             foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
             wp_reset_postdata();
         }
@@ -271,7 +251,7 @@ $score = self::coseno($vq, $vec);
             'avviato_il' => $avvio,
             'completato_il' => current_time('mysql'),
             'modello' => $modello,
-            'tot_voci' => (int)$conteggio,
+            'tot_voci' => (int)(count($q->posts ?? []) + (self::woo_attivo() ? count($qp->posts ?? []) : 0)),
             'chunks_creati' => $conteggio,
             'errori' => $errori,
         ]);
@@ -418,8 +398,4 @@ $score = self::coseno($vq, $vec);
         $den = (sqrt($na)*sqrt($nb));
         return $den>0 ? ($dot/$den) : 0.0;
     }
-
-        } finally {
-            delete_transient($lock_key);
-        }
 }

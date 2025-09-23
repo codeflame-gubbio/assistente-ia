@@ -13,12 +13,6 @@ class Assistente_IA_Admin_RAG {
         if ( get_option('assia_attiva_embeddings', null) === null ) add_option('assia_attiva_embeddings','si');
         if ( get_option('assia_embeddings_top_k', null) === null ) add_option('assia_embeddings_top_k',5);
         if ( get_option('assia_embeddings_solo_migliori', null) === null ) add_option('assia_embeddings_solo_migliori','no');
-        // Default fonti RAG
-        if ( get_option('assia_rag_post_scope', null) === null ) add_option('assia_rag_post_scope','tutti');
-        if ( get_option('assia_rag_post_ids', null) === null ) add_option('assia_rag_post_ids', []);
-        if ( get_option('assia_rag_page_scope', null) === null ) add_option('assia_rag_page_scope','tutti');
-        if ( get_option('assia_rag_page_ids', null) === null ) add_option('assia_rag_page_ids', []);
-
 
         add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ]);
         add_action('admin_init', [ __CLASS__, 'registra_impostazioni_rag' ]);
@@ -65,31 +59,7 @@ class Assistente_IA_Admin_RAG {
         ]);
 
         // Sezione descrittiva
-        
-
-// ---- Selettori fonti: articoli/pagine ----
-register_setting('assia_rag', 'assia_rag_post_scope', [
-    'type'=>'string',
-    'sanitize_callback'=>function($v){ return ($v==='specifici'?'specifici':'tutti'); },
-    'default'=>'tutti'
-]);
-register_setting('assia_rag', 'assia_rag_post_ids', [
-    'type'=>'array',
-    'sanitize_callback'=>function($arr){ return array_values(array_unique(array_map('intval', (array)$arr))); },
-    'default'=>[]
-]);
-register_setting('assia_rag', 'assia_rag_page_scope', [
-    'type'=>'string',
-    'sanitize_callback'=>function($v){ return ($v==='specifici'?'specifici':'tutti'); },
-    'default'=>'tutti'
-]);
-register_setting('assia_rag', 'assia_rag_page_ids', [
-    'type'=>'array',
-    'sanitize_callback'=>function($arr){ return array_values(array_unique(array_map('intval', (array)$arr))); },
-    'default'=>[]
-]);
-
-add_settings_section(
+        add_settings_section(
             'assia_sezione_rag',
             'RAG (Embeddings)',
             function(){
@@ -168,92 +138,3 @@ add_settings_section(
 
 // Avvio
 Assistente_IA_Admin_RAG::init();
-
-
-        // Sezione: Fonti da indicizzare
-        add_settings_section(
-            'assia_sezione_fonti',
-            'Fonti da indicizzare',
-            function(){
-                echo '<p>Scegli quali contenuti includere nel RAG. I prodotti WooCommerce sono sempre inclusi (se attivo).</p>';
-            },
-            'assistente-ia-rag'
-        );
-
-        // Campo: Articoli
-        add_settings_field(
-            'assia_rag_post_scope',
-            'Articoli (post)',
-            function(){
-                $scope = get_option('assia_rag_post_scope','tutti');
-                $selez = (array) get_option('assia_rag_post_ids',[]);
-                ?>
-                <p>
-                    <label><input type="radio" name="assia_rag_post_scope" value="tutti" <?php checked('tutti',$scope); ?>> Tutti</label>
-                    &nbsp;&nbsp;
-                    <label><input type="radio" name="assia_rag_post_scope" value="specifici" <?php checked('specifici',$scope); ?>> Solo specifici</label>
-                </p>
-                <div id="assia-post-specifici" style="<?php echo ($scope==='specifici'?'':'display:none'); ?>">
-                    <select name="assia_rag_post_ids[]" multiple size="8" style="min-width: 380px;">
-                        <?php
-                        $posts = get_posts([ 'post_type'=>'post','post_status'=>'publish','posts_per_page'=>200, 'orderby'=>'date','order'=>'DESC' ]);
-                        foreach($posts as $p){
-                            echo '<option value="'.esc_attr($p->ID).'" '.(in_array($p->ID,$selez)?'selected':'').'>'.esc_html($p->post_title).' (ID '.$p->ID.')</option>';
-                        }
-                        ?>
-                    </select>
-                    <p class="description">Seleziona gli articoli da includere (si mostrano i 200 più recenti).</p>
-                </div>
-                <script>
-                    (function(){
-                        var radios = document.getElementsByName('assia_rag_post_scope');
-                        var box = document.getElementById('assia-post-specifici');
-                        Array.prototype.forEach.call(radios, function(r){
-                            r.addEventListener('change', function(){ box.style.display = (this.value==='specifici'?'block':'none'); });
-                        });
-                    })();
-                </script>
-                <?php
-            },
-            'assistente-ia-rag',
-            'assia_sezione_fonti'
-        );
-
-        // Campo: Pagine
-        add_settings_field(
-            'assia_rag_page_scope',
-            'Pagine',
-            function(){
-                $scope = get_option('assia_rag_page_scope','tutti');
-                $selez = (array) get_option('assia_rag_page_ids',[]);
-                ?>
-                <p>
-                    <label><input type="radio" name="assia_rag_page_scope" value="tutti" <?php checked('tutti',$scope); ?>> Tutte</label>
-                    &nbsp;&nbsp;
-                    <label><input type="radio" name="assia_rag_page_scope" value="specifici" <?php checked('specifici',$scope); ?>> Solo specifiche</label>
-                </p>
-                <div id="assia-page-specifiche" style="<?php echo ($scope==='specifici'?'':'display:none'); ?>">
-                    <select name="assia_rag_page_ids[]" multiple size="8" style="min-width: 380px;">
-                        <?php
-                        $pages = get_pages([ 'sort_column'=>'post_date','sort_order'=>'desc','number'=>200 ]);
-                        foreach($pages as $p){
-                            echo '<option value="'.esc_attr($p->ID).'" '.(in_array($p->ID,$selez)?'selected':'').'>'.esc_html($p->post_title).' (ID '.$p->ID.')</option>';
-                        }
-                        ?>
-                    </select>
-                    <p class="description">Seleziona le pagine da includere (mostriamo max 200).</p>
-                </div>
-                <script>
-                    (function(){
-                        var radios = document.getElementsByName('assia_rag_page_scope');
-                        var box = document.getElementById('assia-page-specifiche');
-                        Array.prototype.forEach.call(radios, function(r){
-                            r.addEventListener('change', function(){ box.style.display = (this.value==='specifici'?'block':'none'); });
-                        });
-                    })();
-                </script>
-                <?php
-            },
-            'assistente-ia-rag',
-            'assia_sezione_fonti'
-        );
