@@ -7,7 +7,20 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  */
 class Assistente_IA_Diagnostica_Modello {
 
-    /** Verifica se il registro è attivo da pannello */
+    
+    /** Cleanup log: mantieni max N record e/o retention per giorni */
+    public static function maybe_cleanup(){
+        global $wpdb; $pref = $wpdb->prefix;
+        $max = (int) get_option('assia_registro_modello_max', 5000);
+        if ( $max > 0 ) {
+            $wpdb->query(\"DELETE FROM {$pref}assistente_ia_diag_modello WHERE id NOT IN (SELECT id FROM (SELECT id FROM {$pref}assistente_ia_diag_modello ORDER BY id DESC LIMIT {$max}) t)\");
+        }
+        $giorni = (int) get_option('assia_registro_modello_retention_giorni', 30);
+        if ( $giorni > 0 ) {
+            $wpdb->query( $wpdb->prepare(\"DELETE FROM {$pref}assistente_ia_diag_modello WHERE creato_il < (NOW() - INTERVAL %d DAY)\", $giorni ) );
+        }
+    }
+/** Verifica se il registro è attivo da pannello */
     public static function attivo(): bool {
         return ('si' === get_option('assia_registro_modello_attivo','no'));
     }
@@ -66,5 +79,8 @@ class Assistente_IA_Diagnostica_Modello {
             'http_code' => $http,
             'errore' => $errore,
         ] );
-    }
+    
+        // Cleanup dopo inserimento
+        self::maybe_cleanup();
+}
 }

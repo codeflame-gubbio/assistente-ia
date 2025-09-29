@@ -9,7 +9,8 @@ class Assistente_IA_RAG {
 
     /** Recupera estratti pertinenti dal DB con similarità coseno (Top-K) + fallback keyword */
     public static function recupera_estratti_rag( string $domanda ): string {
-        if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
+        $k = (int) get_option('assia_embeddings_top_k', 3);
+    if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
             // Embeddings OFF → fallback diretto
             $schede = self::fallback_keyword( $domanda, 3 );
             return self::schede_to_contesto( $schede );
@@ -127,7 +128,7 @@ class Assistente_IA_RAG {
 
         for ( $step = 0; $step < $batch && $i < $tot; $step++, $i++ ) {
             $voce = $job['voci'][$i] ?? null;
-            if ( ! is_array($voce) ) break;
+            if ( ! is_array($voce) ) continue;
 
             $fonte = $voce['fonte'] ?? 'post';
             $pid   = (int)($voce['id'] ?? 0);

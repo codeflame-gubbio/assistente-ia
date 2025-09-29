@@ -98,6 +98,8 @@ class Assistente_IA_Installazione {
             'assia_registro_modello_attivo' => 'no', // on/off diagnostica modello
             'assia_ruolo_sistema' => '',             // systemInstruction personalizzabile
         ];
+        $predef['assia_registro_modello_max']=5000;
+        $predef['assia_registro_modello_retention_giorni']=30;
         foreach($predef as $k=>$v){ if(get_option($k,null)===null){ add_option($k,$v); } }
     }
 

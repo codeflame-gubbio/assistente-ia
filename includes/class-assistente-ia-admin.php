@@ -43,12 +43,6 @@ public function aggiungi_menu(){
     );
 
     // Aggiungi il sottomenu RAG qui SOLO se la classe non lo aggiunge da sola altrove
-    if ( class_exists('Assistente_IA_Admin_RAG') ) {
-        add_submenu_page(
-            'assia', 'RAG (Embeddings)', 'RAG (Embeddings)', 'manage_options', 'assistente-ia-rag',
-            [ 'Assistente_IA_Admin_RAG', 'render_pagina_rag' ]
-        );
-    }
 }
 
 
