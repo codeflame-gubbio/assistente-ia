@@ -10,6 +10,9 @@ class Assistente_IA_Admin {
         add_action( 'admin_menu', [ $this, 'aggiungi_menu' ] );
         add_action( 'admin_init', [ $this, 'registra_impostazioni' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'carica_script_admin' ] );
+    
+        add_action('add_meta_boxes', [ $this, 'aggiungi_meta_box_contesto' ]);
+        add_action('save_post', [ $this, 'salva_meta_box_contesto' ]);
     }
 
 public function aggiungi_menu(){
@@ -59,9 +62,9 @@ public function aggiungi_menu(){
             'assia_obiettivo','assia_avviso','assia_temperature','assia_top_p','assia_top_k','assia_max_token',
             'assia_safety_soglie','assia_attiva_google_search','assia_attiva_embeddings','assia_embeddings_top_k',
             'assia_embeddings_solo_migliori','assia_turni_modello','assia_messaggi_ui','assia_ttl_giorni',
-            'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione','assia_inserimento_automatico_footer',
+            'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione',
             // nuove:
-            'assia_registro_modello_attivo','assia_ruolo_sistema'
+            'assia_registro_modello_attivo','assia_ruolo_sistema','assia_inserimento_automatico_footer','assia_context_wc','assia_context_brief_enable'
         ] as $o) {
             register_setting('assia_opt',$o);
         }
@@ -145,6 +148,24 @@ public function aggiungi_menu(){
                     <option value="1" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'1'); ?>>Sì (predefinito)</option>
                     <option value="0" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'0'); ?>>No (usa solo shortcode)</option>
                 </select>
+            </td></tr>
+        </table>
+
+        <h2>Contesto intelligente</h2>
+        <table class="form-table">
+            <tr><th>Usa contesto WooCommerce</th><td>
+                <select name="assia_context_wc">
+                    <option value="si" <?php selected(get_option('assia_context_wc','si'),'si'); ?>>Sì (predefinito)</option>
+                    <option value="no" <?php selected(get_option('assia_context_wc','si'),'no'); ?>>No</option>
+                </select>
+                <p class="description">Se sei su una pagina prodotto pubblica, include nel prompt SKU, prezzo e categorie.</p>
+            </td></tr>
+            <tr><th>Usa mini-brief per pagina</th><td>
+                <select name="assia_context_brief_enable">
+                    <option value="si" <?php selected(get_option('assia_context_brief_enable','si'),'si'); ?>>Sì (predefinito)</option>
+                    <option value="no" <?php selected(get_option('assia_context_brief_enable','si'),'no'); ?>>No</option>
+                </select>
+                <p class="description">Aggiungi un contesto specifico (testo libero) per la pagina/post (solo se pubblica).</p>
             </td></tr>
         </table>
 
@@ -320,19 +341,17 @@ public function aggiungi_menu(){
     /** ------------------ PAGINA ARCHIVIO CONVERSAZIONI ------------------ */
     public function pagina_archivio(){
         
-        // Gestione svuota archivio
+        // Gestione svuota archivio (v5.1+)
         if ( isset($_POST['assia_svuota_archivio']) ){
             if ( ! current_user_can('manage_options') ) { wp_die('Permessi insufficienti'); }
             check_admin_referer('assia_svuota_archivio');
             global $wpdb; $pref=$wpdb->prefix;
-            // Prova con TRUNCATE, fallback a DELETE se fallisce
             $ok1 = $wpdb->query("TRUNCATE TABLE {$pref}assistente_ia_messaggi");
             if ($ok1 === false){ $wpdb->query("DELETE FROM {$pref}assistente_ia_messaggi"); }
             $ok2 = $wpdb->query("TRUNCATE TABLE {$pref}assistente_ia_chat");
             if ($ok2 === false){ $wpdb->query("DELETE FROM {$pref}assistente_ia_chat"); }
             echo '<div class="updated"><p>Archivio conversazioni svuotato.</p></div>';
         }
-
 global $wpdb; $pref=$wpdb->prefix;
 
         // Vista dettaglio chat
@@ -384,11 +403,10 @@ global $wpdb; $pref=$wpdb->prefix;
         ?>
         <div class="wrap">
             <h1>Archivio conversazioni</h1>
-                <form method="post" style="margin:12px 0 18px 0;" onsubmit="return confirm('Confermi di svuotare tutte le conversazioni? Questa azione è irreversibile.');">
-                    <?php wp_nonce_field('assia_svuota_archivio'); ?>
-                    <button type="submit" name="assia_svuota_archivio" class="button button-danger" style="background:#dc2626;border-color:#dc2626;color:#fff;">Svuota archivio conversazioni</button>
-                </form>
-    
+        <form method="post" style="margin:12px 0 18px 0;" onsubmit="return confirm('Confermi di svuotare tutte le conversazioni? Questa azione è irreversibile.');">
+            <?php wp_nonce_field('assia_svuota_archivio'); ?>
+            <button type="submit" name="assia_svuota_archivio" class="button button-danger" style="background:#dc2626;border-color:#dc2626;color:#fff;">Svuota archivio conversazioni</button>
+        </form>
             <?php if ($righe): ?>
                 <table class="widefat striped">
                     <thead><tr><th>ID</th><th>Hash sessione</th><th>Creato</th><th>Ultimo agg.</th><th># messaggi</th><th>Azione</th></tr></thead>
@@ -505,4 +523,51 @@ global $wpdb; $pref=$wpdb->prefix;
         $res['stale_lista'] = $stale;
         return $res;
     }
+/** Meta-box: Contesto specifico della pagina (mini-brief) */
+    public function aggiungi_meta_box_contesto(){
+        $screens = apply_filters('assia_context_brief_screens', ['post','page','product']);
+        foreach($screens as $scr){
+            add_meta_box(
+                'assia_context_brief_mb',
+                'Assistente IA – Contesto specifico',
+                [ $this, 'render_meta_box_contesto' ],
+                $scr,
+                'normal',
+                'default'
+            );
+        }
+    }
+
+    public function render_meta_box_contesto( $post ){
+        if ( 'no' === get_option('assia_context_brief_enable','si') ) {
+            echo '<p style="color:#6b7280">Il mini-brief è disabilitato nelle impostazioni.</p>';
+            return;
+        }
+        $val = get_post_meta($post->ID, 'assia_context_brief', true);
+        $val = is_string($val) ? esc_textarea($val) : '';
+        wp_nonce_field('assia_context_brief_save','assia_context_brief_nonce');
+        echo '<p style="margin-top:0">Scrivi qui un contesto editoriale operativo che l\'assistente deve considerare per questa pagina/prodotto (es. tono, USP, CTA, vincoli).</p>';
+        echo '<textarea name="assia_context_brief" rows="6" style="width:100%;">'.$val.'</textarea>';
+        echo '<p class="description">Questo testo verrà incluso nel prompt solo se la pagina è pubblica e l\'opzione è attiva.</p>';
+    }
+
+    public function salva_meta_box_contesto( $post_id ){
+        if ( ! isset($_POST['assia_context_brief_nonce']) ) return;
+        if ( ! wp_verify_nonce( $_POST['assia_context_brief_nonce'], 'assia_context_brief_save' ) ) return;
+        if ( defined('DOING_AUTOSAVE') && DOING_AUTOSAVE ) return;
+        if ( ! current_user_can('edit_post', $post_id) ) return;
+
+        $raw = isset($_POST['assia_context_brief']) ? wp_unslash($_POST['assia_context_brief']) : '';
+        if ( is_string($raw) ) {
+            $san = wp_kses_post( $raw );
+            if ( trim($san) === '' ){
+                delete_post_meta($post_id, 'assia_context_brief');
+            } else {
+                update_post_meta($post_id, 'assia_context_brief', $san);
+            }
+        }
+    }
 }
+
+
+    

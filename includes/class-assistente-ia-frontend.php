@@ -5,16 +5,11 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  * Widget chat front-end + shortcode [assistente_ia]
  */
 class Assistente_IA_Frontend {
-
-    /** Evita doppio render (footer + shortcode) */
     private static $rendered = false;
-
 
     public function __construct(){
         add_action('wp_enqueue_scripts',[ $this,'carica' ]);
-        if ( '1' === get_option('assia_inserimento_automatico_footer','1') ) {
-            add_action('wp_footer',[ $this,'render' ]);
-        }
+        if ( '1' === get_option('assia_inserimento_automatico_footer','1') ) { add_action('wp_footer',[ $this,'render' ]); }
         add_shortcode('assistente_ia',[ $this,'shortcode' ]);
     }
 
@@ -32,15 +27,8 @@ class Assistente_IA_Frontend {
         ]);
     }
 
-    public function render(){
-        if ( self::$rendered ) { return; }
-        echo $this->html();
-        self::$rendered = true;
-    }
-    public function shortcode(){
-        self::$rendered = true;
-        return $this->html();
-    }
+    public function render(){ if(self::$rendered) return; echo $this->html(); self::$rendered=true; }
+    public function shortcode(){ self::$rendered=true; return $this->html(); }
 
     /** HTML del widget */
     protected function html(): string {

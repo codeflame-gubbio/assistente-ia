@@ -65,13 +65,13 @@
 
     // UI eventi
     $(document).on('click','#assistente-ia-bottone',function(){
-        $('#assistente-ia-popup').toggleClass('assia-nascosto'); if(!$('#assistente-ia-popup').hasClass('assia-nascosto')){ setTimeout(function(){ $('#assistente-ia-input').focus(); }, 0); }
+        $('#assistente-ia-popup').toggleClass('assia-nascosto');
     });
     $(document).on('click','.assistente-ia-chiudi',function(){
         $('#assistente-ia-popup').addClass('assia-nascosto');
     });
     $(document).on('click','#assistente-ia-invia',invia);
-    $(document).on('keydown','#assistente-ia-input',function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); invia(); } });
+    $(document).on('keypress','#assistente-ia-input',function(e){ if(e.which===13) invia(); });
 
     // All’avvio: riidrata
     $(function(){ riidrata_chat(); });

@@ -22,17 +22,16 @@ class Assistente_IA_Ajax {
     public function gestisci_chat(){
         check_ajax_referer('assistente_ia_nonce','nonce');
 
-        $messaggio=isset($_POST['messaggio'])?sanitize_textarea_field(wp_unslash($_POST['messaggio'])):'';
+        $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
-        $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
 
         Assistente_IA_Utilita::limita_richieste_utente($hash);
 
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $this->salva_messaggio($id_chat,'utente',$messaggio);
 
-        $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio, $post_id);
+        $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
         $res=Assistente_IA_Modello_Vertex::genera_testo($prompt, [
     'id_chat'       => $id_chat,
     'hash_sessione' => $hash,
@@ -117,11 +116,12 @@ class Assistente_IA_Ajax {
     protected function postprocesso_risposta(string $testo): string {
         $testo=trim($testo);
         // Link plain → <a>
-        $testo = preg_replace_callback('#(?<!["\'>])(https?://[^\\s<]+)#', function($m){
+        $testo = preg_replace_callback('#(?<!["\'>])(https?://[^\s<]+)#', function($m){
             $url = esc_url($m[1]);
             if ( empty($url) ) return $m[1];
             return '<a href="'.esc_url($url).'" target="_blank" rel="noopener nofollow">'.esc_html($m[1]).'</a>';
-        }, $testo);// Paragrafi
+        }, $testo);
+        // Paragrafi
         $out=''; foreach(explode("\n",$testo) as $r){ $out.='<p>'.wp_kses_post($r).'</p>'; }
 
         // Card per link a post WP
