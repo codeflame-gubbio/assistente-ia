@@ -7,6 +7,9 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 class Assistente_IA_Ajax {
 
     public function __construct(){
+        
+        add_action('wp_ajax_assistente_ia_storico',       [ $this, 'storico' ] );
+        add_action('wp_ajax_nopriv_assistente_ia_storico',[ $this, 'storico' ] );
         add_action('wp_ajax_assistente_ia_chat',[ $this,'gestisci_chat' ]);
         add_action('wp_ajax_nopriv_assistente_ia_chat',[ $this,'gestisci_chat' ]);
 
@@ -22,7 +25,7 @@ class Assistente_IA_Ajax {
     public function gestisci_chat(){
         check_ajax_referer('assistente_ia_nonce','nonce');
 
-        $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
+        $messaggio = isset($_POST['messaggio']) ? sanitize_textarea_field( wp_unslash($_POST['messaggio']) ) : '';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
         $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
@@ -148,14 +151,8 @@ class Assistente_IA_Ajax {
         if ( empty($hash) ) wp_send_json_success(['messaggi'=>[]]);
         $id_chat = $this->ottieni_o_crea_chat($hash);
         global $wpdb; $pref = $wpdb->prefix;
-        $tab = "{$pref}assistente_ia_messaggi";
-        $cols = $wpdb->get_col("SHOW COLUMNS FROM $tab", 0);
-        $col_from = in_array('mittente',$cols,true) ? 'mittente' : (in_array('ruolo',$cols,true) ? 'ruolo' : "'bot'");
-        $col_text = in_array('testo',$cols,true) ? 'testo' : (in_array('message',$cols,true) ? 'message' : "''");
-        $col_time = in_array('creato_il',$cols,true) ? 'creato_il' : (in_array('created_at',$cols,true) ? 'created_at' : 'NOW()');
-        
         $righe = $wpdb->get_results( $wpdb->prepare(
-            "SELECT $col_from AS mittente, $col_text AS testo, $col_time AS creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
+            "SELECT mittente, testo, creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
             $id_chat, $limite
         ), ARRAY_A );
         $righe = array_reverse( $righe ?: [] );

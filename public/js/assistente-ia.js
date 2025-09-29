@@ -3,11 +3,24 @@
 
     // Genera o recupera un hash sessione locale (riidratazione cross-pagina)
     function ottieni_o_crea_hash_sessione(){
-        var k='assistente_ia_hash', h=localStorage.getItem(k);
-        if(!h){
-            h=(Date.now().toString(36)+Math.random().toString(36).slice(2,10)).toUpperCase();
-            localStorage.setItem(k,h);
-        }
+  if (window.AssistenteIA && AssistenteIA.hash) {
+    return AssistenteIA.hash;
+  }
+  try {
+    var k='assistente_ia_hash', h=localStorage.getItem(k);
+    if(!h){
+      h=(Date.now().toString(36)+Math.random().toString(36).slice(2,10)).toUpperCase();
+      localStorage.setItem(k,h);
+    }
+    return h;
+  } catch(e) {
+    console.warn('localStorage non disponibile, uso hash temporaneo');
+    if(!window._assia_temp_hash){
+      window._assia_temp_hash = Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+    }
+    return window._assia_temp_hash;
+  }
+}
         return h;
     }
 

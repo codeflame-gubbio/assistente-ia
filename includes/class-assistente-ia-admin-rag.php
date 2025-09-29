@@ -14,7 +14,7 @@ class Assistente_IA_Admin_RAG {
         if ( get_option('assia_embeddings_top_k', null) === null ) add_option('assia_embeddings_top_k',5);
         if ( get_option('assia_embeddings_solo_migliori', null) === null ) add_option('assia_embeddings_solo_migliori','no');
 
-        add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ], 99);
+        add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ]);
         add_action('admin_init', [ __CLASS__, 'registra_impostazioni_rag' ]);
     }
 

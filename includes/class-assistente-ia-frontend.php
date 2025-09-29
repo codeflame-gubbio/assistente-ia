@@ -9,7 +9,7 @@ class Assistente_IA_Frontend {
         $cookie = isset($_COOKIE['assia_hash']) ? sanitize_text_field($_COOKIE['assia_hash']) : '';
         if ( ! $cookie ) {
             $cookie = wp_generate_uuid4();
-            setcookie('assia_hash', $cookie, time()+3600*24*365, COOKIEPATH, COOKIE_DOMAIN);
+            setcookie('assia_hash', $cookie, time()+3600*24*365, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), true);
             $_COOKIE['assia_hash'] = $cookie;
         }
         return $cookie;
@@ -27,11 +27,6 @@ class Assistente_IA_Frontend {
     public function carica(){
         wp_enqueue_style('assia-css', ASSIA_URL.'public/css/assistente-ia.css',[],ASSIA_VERSIONE);
         wp_enqueue_script('assia-js', ASSIA_URL.'public/js/assistente-ia.js',['jquery'],ASSIA_VERSIONE,true);
-        wp_localize_script('assistente-ia','AssistenteIA', array(
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('assistente_ia_nonce'),
-            'hash'     => self::get_hash_sessione()
-        ));
         wp_localize_script('assia-js','AssistenteIA',[
             'ajax_url'=>admin_url('admin-ajax.php'),
             'nonce'=>wp_create_nonce('assistente_ia_nonce'),
