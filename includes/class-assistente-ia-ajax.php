@@ -25,13 +25,14 @@ class Assistente_IA_Ajax {
         $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
+        $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
 
         Assistente_IA_Utilita::limita_richieste_utente($hash);
 
         $id_chat=$this->ottieni_o_crea_chat($hash);
         $this->salva_messaggio($id_chat,'utente',$messaggio);
 
-        $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio);
+        $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio, $post_id);
         $res=Assistente_IA_Modello_Vertex::genera_testo($prompt, [
     'id_chat'       => $id_chat,
     'hash_sessione' => $hash,

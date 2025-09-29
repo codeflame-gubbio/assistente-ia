@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  */
 class Assistente_IA_Prompt {
 
-public static function costruisci_prompt(int $id_chat, string $domanda): string {
+public static function costruisci_prompt(int $id_chat, string $domanda, int $post_id = 0): string {
     $obiettivo=get_option('assia_obiettivo','');
     $avviso=get_option('assia_avviso','');
 
@@ -14,7 +14,11 @@ public static function costruisci_prompt(int $id_chat, string $domanda): string 
     $estratti=Assistente_IA_RAG::recupera_estratti_rag($domanda);
 
     $b=[];
-    if($obiettivo)$b[]="[Obiettivo]\n".Assistente_IA_Utilita::pulisci_testo($obiettivo);
+    if ( !empty($contesto_brief) ) { $b[] = "Contesto specifico della pagina
+".$contesto_brief; }
+    if ( !empty($contesto_wc) ) { $b[] = "Contesto WooCommerce
+".$contesto_wc; }
+if($obiettivo)$b[]="[Obiettivo]\n".Assistente_IA_Utilita::pulisci_testo($obiettivo);
     if($avviso)$b[]="[Avviso]\n".Assistente_IA_Utilita::pulisci_testo($avviso);
     if($riassunto)$b[]="[Riassunto conversazione]\n".$riassunto;
     if($ultimi)$b[]="[Ultimi turni]\n".$ultimi;
