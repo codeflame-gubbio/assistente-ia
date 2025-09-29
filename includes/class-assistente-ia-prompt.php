@@ -13,6 +13,64 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
     list($riassunto,$ultimi)=self::recupera_contesto_conversazione($id_chat);
     $estratti=Assistente_IA_RAG::recupera_estratti_rag($domanda);
 
+    // --- v5.3.4: Context Smart ---
+    // Contesto della pagina corrente (titolo/URL/riassunto), se post pubblico
+    $contesto_pagina = '';
+    if ( $post_id > 0 ) {
+        $p = get_post($post_id);
+        if ( $p && $p->post_status === 'publish' && empty($p->post_password) ) {
+            $tit = get_the_title($p);
+            $url = get_permalink($p);
+            $estr = wp_trim_words( wp_strip_all_tags( get_the_excerpt($p) ?: $p->post_content ), 40 );
+            $contesto_pagina = "Titolo: {$tit}\nURL: {$url}\nRiassunto: {$estr}";
+        }
+    }
+
+    // Contesto WooCommerce (solo se abilitato e su product pubblicato)
+    $contesto_wc = '';
+    if ( 'si' === get_option('assia_context_wc','si') && $post_id > 0 && function_exists('wc_get_product') ) {
+        $post_type = get_post_type( $post_id );
+        $stato = get_post_status( $post_id );
+        if ( $post_type === 'product' && $stato === 'publish' ) {
+            $product = wc_get_product( $post_id );
+            if ( $product instanceof WC_Product ) {
+                $tit = get_the_title($post_id);
+                $url = get_permalink($post_id);
+                $sku = $product->get_sku() ?: '-';
+                // Prezzo con gestione variabili (range)
+                $prezzo = '';
+                if ( $product->is_type('variable') ) {
+                    $min = $product->get_variation_price('min', true);
+                    $max = $product->get_variation_price('max', true);
+                    if ( $min && $max && $min != $max ) { $prezzo = wc_price($min) . ' – ' . wc_price($max); }
+                    else { $prezzo = wc_price($min ?: $max); }
+                } else {
+                    $prezzo = wc_price( $product->get_price() );
+                }
+                // Categorie
+                $terms = get_the_terms($post_id, 'product_cat'); $cats=[];
+                if ( is_array($terms) ) { foreach($terms as $t){ $cats[] = $t->name; } }
+                $cats_str = $cats ? implode(', ', $cats) : '-';
+                $contesto_wc = "Titolo: {$tit}\nURL: {$url}\nSKU: {$sku}\nPrezzo: {$prezzo}\nCategorie: {$cats_str}";
+            }
+        }
+    }
+
+    // Contesto specifico (mini-brief) per la pagina/post, se abilitato
+    $contesto_brief = '';
+    if ( 'si' === get_option('assia_context_brief_enable','si') && $post_id > 0 ) {
+        $p = get_post($post_id);
+        if ( $p && $p->post_status === 'publish' && empty($p->post_password) ) {
+            $raw = get_post_meta($post_id, 'assia_context_brief', true);
+            if ( is_string($raw) && trim($raw) !== '' ) {
+                $brief_txt = wp_strip_all_tags( $raw );
+                if ( strlen($brief_txt) > 1000 ) { $brief_txt = substr($brief_txt,0,1000).'…'; }
+                $contesto_brief = $brief_txt;
+            }
+        }
+    }
+    // --- /Context Smart ---
+
     $b=[];
     if ( !empty($contesto_brief) ) { $b[] = "Contesto specifico della pagina
 ".$contesto_brief; }
