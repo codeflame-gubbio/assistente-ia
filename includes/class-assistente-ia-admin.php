@@ -51,20 +51,42 @@ public function aggiungi_menu(){
 
 
     public function registra_impostazioni(){
-        foreach([
-            'assia_progetto_id','assia_localita','assia_modello','assia_modello_embedding','assia_credenziali_base64',
-            'assia_obiettivo','assia_avviso','assia_temperature','assia_top_p','assia_top_k','assia_max_token',
-            'assia_safety_soglie','assia_attiva_google_search','assia_attiva_embeddings','assia_embeddings_top_k',
-            'assia_embeddings_solo_migliori','assia_turni_modello','assia_messaggi_ui','assia_ttl_giorni',
-            'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione',
-            // nuove:
-            'assia_registro_modello_attivo','assia_ruolo_sistema','assia_inserimento_automatico_footer','assia_context_wc','assia_context_brief_enable'
-        ] as $o) {
-            register_setting('assia_opt',$o);
-        }
+        $opts = array(
+            'assia_progetto_id',
+            'assia_localita',
+            'assia_modello',
+            'assia_modello_embedding',
+            'assia_credenziali_base64',
+            'assia_obiettivo',
+            'assia_avviso',
+            'assia_temperature',
+            'assia_top_p',
+            'assia_top_k',
+            'assia_max_token',
+            'assia_safety_soglie',
+            'assia_attiva_google_search',
+            'assia_attiva_embeddings',
+            'assia_embeddings_top_k',
+            'assia_embeddings_solo_migliori',
+            'assia_turni_modello',
+            'assia_messaggi_ui',
+            'assia_ttl_giorni',
+            'assia_rate_limite_max',
+            'assia_rate_limite_finestra_sec',
+            'assia_bottone_testo',
+            'assia_bottone_posizione',
+            'assia_registro_modello_attivo',
+            'assia_ruolo_sistema',
+            'assia_inserimento_automatico_footer',
+            'assia_context_wc',
+            'assia_context_brief_enable',
+            'assia_registro_modello_max',
+            'assia_registro_modello_retention_giorni'
+        );
+        foreach($opts as $o){ register_setting('assia_opt', $o); }
     }
 
-    public function carica_script_admin( $hook ){
+public function carica_script_admin( $hook ){
         if ( isset($_GET['page']) && $_GET['page'] === 'assia-diagnostica' ) {
             wp_enqueue_script('assia-admin-js', ASSIA_URL.'public/js/assia-admin.js', ['jquery'], ASSIA_VERSIONE, true );
             wp_localize_script('assia-admin-js', 'AssistenteIAAdmin', [
@@ -519,6 +541,7 @@ global $wpdb; $pref=$wpdb->prefix;
     }
 /** Meta-box: Contesto specifico della pagina (mini-brief) */
     public function aggiungi_meta_box_contesto(){
+        if ( 'no' === get_option('assia_context_brief_enable','si') ) { return; }
         $screens = apply_filters('assia_context_brief_screens', ['post','page','product']);
         foreach($screens as $scr){
             add_meta_box(

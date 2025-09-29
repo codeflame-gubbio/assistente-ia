@@ -12,7 +12,7 @@ class Assistente_IA_RAG {
         $k = (int) get_option('assia_embeddings_top_k', 3);
     if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
             // Embeddings OFF → fallback diretto
-            $schede = self::fallback_keyword( $domanda, 3 );
+            $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
         }
 
@@ -26,7 +26,7 @@ class Assistente_IA_RAG {
         );
         if ( empty($emb['vettore']) ) {
             // Se embedding fallisce → fallback keyword
-            $schede = self::fallback_keyword( $domanda, 3 );
+            $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
         }
         $vq = $emb['vettore'];
@@ -341,7 +341,7 @@ class Assistente_IA_RAG {
         $desc   = wp_strip_all_tags( $p->get_description() );
         $prezzo = method_exists($p,'get_price') ? $p->get_price() : '';
         $valuta = function_exists('get_woocommerce_currency_symbol') ? get_woocommerce_currency_symbol() : '€';
-        $stock  = method_exists($p,'is_in_stock') ? ($p->is_in_stock() ? 'in stock' : 'non disponibile') : '';
+        $stock  = method_exists($p,'is_in_stock') ? ($p->is_in_stock() ? 'disponibile' : 'non disponibile') : '';
         $cats   = wp_get_post_terms( $product_id, 'product_cat', ['fields'=>'names'] );
         $cats_s = $cats ? implode(', ', $cats) : '';
         $link   = get_permalink( $product_id );

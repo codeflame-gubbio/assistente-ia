@@ -65,15 +65,39 @@
 
     // UI eventi
     $(document).on('click','#assistente-ia-bottone',function(){
-        $('#assistente-ia-popup').toggleClass('assia-nascosto');
+        $('#assistente-ia-popup').toggleClass('assia-nascosto'); if(!$('#assistente-ia-popup').hasClass('assia-nascosto')){ setTimeout(function(){ $('#assistente-ia-input').focus(); }, 0); assiaCaricaStorico && assiaCaricaStorico(); }
     });
     $(document).on('click','.assistente-ia-chiudi',function(){
         $('#assistente-ia-popup').addClass('assia-nascosto');
     });
     $(document).on('click','#assistente-ia-invia',invia);
-    $(document).on('keypress','#assistente-ia-input',function(e){ if(e.which===13) invia(); });
+    $(document).on('keydown','#assistente-ia-input',function(e){ if(e.key==='Enter' && !e.shiftKey) invia(); });
 
     // All’avvio: riidrata
-    $(function(){ riidrata_chat(); });
+    function assiaErrore(msg){
+  try{
+    var box = $('#assistente-ia-messaggi'); if(!box.length){ console.error('Assistente IA:', msg); return; }
+    var el = $('<div class="assia-msg assia-errore"></div>').text(msg); box.append(el);
+    box.scrollTop(box.prop('scrollHeight'));
+  }catch(e){ console.error('Assistente IA:', msg, e); }
+}
+$(function(){ riidrata_chat(); });
 
 })(jQuery);
+
+function assiaCaricaStorico(){
+  try{
+    var hash = (window.AssistenteIA && AssistenteIA.hash) || '';
+    if(!hash){ return; }
+    $.post(AssistenteIA.ajax_url, { action:'assistente_ia_storico', _wpnonce: AssistenteIA.nonce, hash_sessione: hash, limite: 50 })
+     .done(function(r){
+        if(!r || !r.success || !r.data){ assiaErrore('Errore: risposta non valida dal server.'); return; }
+        var box = $('#assistente-ia-messaggi'); if(!box.length){ return; } box.empty();
+        (r.data.messaggi || []).forEach(function(m){
+          var el = $('<div class="assia-msg"></div>').addClass(m.tipo==='utente'?'assia-utente':'assia-bot'); el.text(m.testo); box.append(el);
+        });
+        box.scrollTop(box.prop('scrollHeight'));
+     })
+     .fail(function(){ assiaErrore('Errore nel caricamento delle conversazioni precedenti.'); });
+  }catch(e){ console.error('Assistente IA - storico exception', e); }
+}

@@ -66,3 +66,10 @@
 @media (max-width: 420px){
   #assistente-ia-popup{ right:10px; left:10px; width:auto; }
 }
+
+/* Patch v5.3.6.x: layout chat robust + mobile */
+#assistente-ia-popup, #assistente-ia-popup * { box-sizing: border-box; }
+#assistente-ia-popup .assistente-ia-inputarea{ display:flex; align-items:flex-end; gap:8px; padding:10px; border-top:1px solid #eee; }
+#assistente-ia-popup #assistente-ia-input{ flex:1 1 auto; min-width:0; width:100%; min-height:44px; max-height:160px; line-height:1.35; resize:vertical; padding:10px 12px; border:1px solid #ddd; border-radius:10px; }
+#assistente-ia-popup button#assistente-ia-invia{ position:static !important; right:auto !important; top:auto !important; bottom:auto !important; left:auto !important; transform:none !important; margin:0 !important; flex:0 0 44px; width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center; border:none; border-radius:10px; cursor:pointer; }
+@media (max-width:420px){ #assistente-ia-popup{ right:10px; left:10px; width:auto; } }

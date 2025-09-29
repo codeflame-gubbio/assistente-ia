@@ -140,4 +140,23 @@ class Assistente_IA_Ajax {
 
         return $out;
     }
+
+    public function storico(){
+        check_ajax_referer('assistente_ia_nonce');
+        $hash = isset($_POST['hash_sessione']) ? sanitize_text_field( wp_unslash($_POST['hash_sessione']) ) : '';
+        $limite = isset($_POST['limite']) ? max(1, intval($_POST['limite'])) : 50;
+        if ( empty($hash) ) wp_send_json_success(['messaggi'=>[]]);
+        $id_chat = $this->ottieni_o_crea_chat($hash);
+        global $wpdb; $pref = $wpdb->prefix;
+        $righe = $wpdb->get_results( $wpdb->prepare(
+            "SELECT mittente, testo, creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
+            $id_chat, $limite
+        ), ARRAY_A );
+        $righe = array_reverse( $righe ?: [] );
+        $messaggi = [];
+        foreach($righe as $r){
+            $messaggi[] = [ 'tipo' => $r['mittente']==='utente'?'utente':'bot', 'testo' => wp_strip_all_tags( (string) $r['testo'] ), 'ts' => $r['creato_il'] ];
+        }
+        wp_send_json_success(['messaggi'=>$messaggi]);
+    }
 }
