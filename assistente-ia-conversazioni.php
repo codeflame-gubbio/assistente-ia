@@ -2,14 +2,14 @@
 /**
  * Plugin Name: Assistente IA Conversazioni
  * Description: Chat con cronologia persistente, riidratazione cross-pagina, RAG con embeddings, rate limit, prompt modulare e integrazione Vertex AI. Stile interamente in italiano.
- * Version: 5.3.7
+ * Version: 5.3.7.3
  * Author: Assistente IA
  * Text Domain: assistente-ia-conversazioni
  */
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ASSIA_VERSIONE', '5.3.7' );
+define( 'ASSIA_VERSIONE', '5.3.7.3' );
 define( 'ASSIA_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ASSIA_URL', plugin_dir_url( __FILE__ ) );
 
@@ -27,7 +27,7 @@ require_once ASSIA_PATH . 'includes/class-assistente-ia-admin-rag.php';
 
 
 
-if ( is_admin() ) { add_action('init', ['Assistente_IA_Admin_RAG','init']); }
+if ( is_admin() ) {  add_action('init', ['Assistente_IA_Admin_RAG','init']); add_action('init', ['Assistente_IA_Admin_RAG','init']); }
 register_activation_hook( __FILE__, ['Assistente_IA_Installazione','all_attivazione'] );
 register_uninstall_hook( __FILE__, ['Assistente_IA_Installazione','alla_disinstallazione'] );
 

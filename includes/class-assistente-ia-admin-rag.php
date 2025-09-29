@@ -14,19 +14,18 @@ class Assistente_IA_Admin_RAG {
         if ( get_option('assia_embeddings_top_k', null) === null ) add_option('assia_embeddings_top_k',5);
         if ( get_option('assia_embeddings_solo_migliori', null) === null ) add_option('assia_embeddings_solo_migliori','no');
 
-        add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ]);
+        add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ], 99);
         add_action('admin_init', [ __CLASS__, 'registra_impostazioni_rag' ]);
     }
 
     /** Aggiunge la voce di sottomenu */
     public static function aggiungi_sottomenu_rag(){
+        
+        $parent = 'assia';
+        $slug   = 'assistente-ia-rag';
+        if ( strpos($slug, '/') !== false || str_ends_with($slug, '.php') ) return;
         $slug_padre = 'assia'; // Cambia se il tuo slug principale è diverso
-        add_submenu_page(
-            $slug_padre,
-            'RAG (Embeddings)',
-            'RAG (Embeddings)',
-            'manage_options',
-            'assistente-ia-rag',
+        add_submenu_page($parent, 'RAG (Embeddings)', 'RAG (Embeddings)', 'manage_options', $slug,
             [ __CLASS__, 'render_pagina_rag' ]
         );
     }
@@ -134,7 +133,10 @@ class Assistente_IA_Admin_RAG {
         </div>
         <?php
     }
-}
 
-// Avvio
-Assistente_IA_Admin_RAG::init();
+    public static function render(){
+        
+        echo '<div class="wrap"><h1>RAG (Embeddings)</h1><p>Gestione embeddings.</p></div>';
+    
+    }
+}

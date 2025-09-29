@@ -33,11 +33,10 @@ class Assistente_IA_RAG {
 
         // 2) Similarità sui chunks indicizzati
         global $wpdb; $pref = $wpdb->prefix;
-        $limit = (int) apply_filters('assia_rag_max_chunks', 500);
-    $righe = $wpdb->get_results( $wpdb->prepare(
-        "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s ORDER BY id DESC LIMIT %d",
-        $sigla, $limit
-    ), ARRAY_A );
+        $righe = $wpdb->get_results( $wpdb->prepare(
+            "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s",
+            $sigla
+        ), ARRAY_A );
 
         $punteggi = [];
         if ( ! empty($righe) ){
@@ -277,22 +276,11 @@ class Assistente_IA_RAG {
             ORDER BY post_date_gmt DESC
             LIMIT %d
         ";
-        $limit = (int) apply_filters('assia_rag_max_chunks', 500);
-    $righe = $wpdb->get_results( $wpdb->prepare(
-        "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s ORDER BY id DESC LIMIT %d",
-        $sigla, $limit
-    ), ARRAY_A );
+        $righe = $wpdb->get_results( $wpdb->prepare( $sql, $like, $like, $limite ), ARRAY_A );
         if ( empty($righe) ) return [];
 
         $schede = [];
-        $keywords = self::estrai_keywords($domanda);
-    foreach( $righe as $r ){ 
-        if ( count($righe) > 100 && ! empty($keywords) ) {
-            $tl = strtolower($r['testo_chunk']);
-            $pass = false;
-            foreach($keywords as $kw){ if (strpos($tl, $kw)!==false){ $pass = true; break; } }
-            if ( ! $pass ) continue;
-        }
+        foreach( $righe as $r ){
             $id = (int)$r['ID'];
             if ( $r['post_type'] === 'product' && self::woo_attivo() ){
                 $txt = self::costruisci_testo_prodotto( $id );
@@ -411,15 +399,15 @@ class Assistente_IA_RAG {
         $den = (sqrt($na)*sqrt($nb));
         return $den>0 ? ($dot/$den) : 0.0;
     }
-}
 
-protected static function estrai_keywords(string $domanda): array {
+protected static function estrai_keywords(string $query): array {
     $stop = ['il','lo','la','i','gli','le','un','uno','una','di','a','da','in','con','su','per','tra','fra','del','della','dei','degli','delle','al','alla','ai','agli','alle','è','sono','che','come','quando','dove','perché'];
-    $parole = preg_split('/\s+/', strtolower(trim($domanda)));
+    $parole = preg_split('/\s+/', strtolower(trim($query)));
     $out = [];
     foreach($parole as $p){
         $p = trim($p, '.,;:!?\"\'()[]{}');
         if (strlen($p)>2 && !in_array($p,$stop,true)){ $out[] = $p; }
     }
     return array_values(array_unique($out));
+}
 }
