@@ -59,7 +59,7 @@ public function aggiungi_menu(){
             'assia_obiettivo','assia_avviso','assia_temperature','assia_top_p','assia_top_k','assia_max_token',
             'assia_safety_soglie','assia_attiva_google_search','assia_attiva_embeddings','assia_embeddings_top_k',
             'assia_embeddings_solo_migliori','assia_turni_modello','assia_messaggi_ui','assia_ttl_giorni',
-            'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione',
+            'assia_rate_limite_max','assia_rate_limite_finestra_sec','assia_bottone_testo','assia_bottone_posizione','assia_inserimento_automatico_footer',
             // nuove:
             'assia_registro_modello_attivo','assia_ruolo_sistema'
         ] as $o) {
@@ -138,6 +138,12 @@ public function aggiungi_menu(){
                 <select name="assia_bottone_posizione">
                     <option value="bottom-right" <?php selected(get_option('assia_bottone_posizione'),'bottom-right');?>>In basso a destra</option>
                     <option value="bottom-left" <?php selected(get_option('assia_bottone_posizione'),'bottom-left');?>>In basso a sinistra</option>
+                </select>
+            </td></tr>
+        <tr><th>Inserimento automatico nel footer</th><td>
+                <select name="assia_inserimento_automatico_footer">
+                    <option value="1" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'1'); ?>>Sì (predefinito)</option>
+                    <option value="0" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'0'); ?>>No (usa solo shortcode)</option>
                 </select>
             </td></tr>
         </table>
@@ -313,7 +319,21 @@ public function aggiungi_menu(){
 
     /** ------------------ PAGINA ARCHIVIO CONVERSAZIONI ------------------ */
     public function pagina_archivio(){
-        global $wpdb; $pref=$wpdb->prefix;
+        
+        // Gestione svuota archivio
+        if ( isset($_POST['assia_svuota_archivio']) ){
+            if ( ! current_user_can('manage_options') ) { wp_die('Permessi insufficienti'); }
+            check_admin_referer('assia_svuota_archivio');
+            global $wpdb; $pref=$wpdb->prefix;
+            // Prova con TRUNCATE, fallback a DELETE se fallisce
+            $ok1 = $wpdb->query("TRUNCATE TABLE {$pref}assistente_ia_messaggi");
+            if ($ok1 === false){ $wpdb->query("DELETE FROM {$pref}assistente_ia_messaggi"); }
+            $ok2 = $wpdb->query("TRUNCATE TABLE {$pref}assistente_ia_chat");
+            if ($ok2 === false){ $wpdb->query("DELETE FROM {$pref}assistente_ia_chat"); }
+            echo '<div class="updated"><p>Archivio conversazioni svuotato.</p></div>';
+        }
+
+global $wpdb; $pref=$wpdb->prefix;
 
         // Vista dettaglio chat
         if ( isset($_GET['chat']) ){
@@ -364,6 +384,11 @@ public function aggiungi_menu(){
         ?>
         <div class="wrap">
             <h1>Archivio conversazioni</h1>
+                <form method="post" style="margin:12px 0 18px 0;" onsubmit="return confirm('Confermi di svuotare tutte le conversazioni? Questa azione è irreversibile.');">
+                    <?php wp_nonce_field('assia_svuota_archivio'); ?>
+                    <button type="submit" name="assia_svuota_archivio" class="button button-danger" style="background:#dc2626;border-color:#dc2626;color:#fff;">Svuota archivio conversazioni</button>
+                </form>
+    
             <?php if ($righe): ?>
                 <table class="widefat striped">
                     <thead><tr><th>ID</th><th>Hash sessione</th><th>Creato</th><th>Ultimo agg.</th><th># messaggi</th><th>Azione</th></tr></thead>

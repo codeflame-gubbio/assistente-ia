@@ -6,9 +6,15 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  */
 class Assistente_IA_Frontend {
 
+    /** Evita doppio render (footer + shortcode) */
+    private static $rendered = false;
+
+
     public function __construct(){
         add_action('wp_enqueue_scripts',[ $this,'carica' ]);
-        add_action('wp_footer',[ $this,'render' ]);
+        if ( '1' === get_option('assia_inserimento_automatico_footer','1') ) {
+            add_action('wp_footer',[ $this,'render' ]);
+        }
         add_shortcode('assistente_ia',[ $this,'shortcode' ]);
     }
 
@@ -26,8 +32,15 @@ class Assistente_IA_Frontend {
         ]);
     }
 
-    public function render(){ echo $this->html(); }
-    public function shortcode(){ return $this->html(); }
+    public function render(){
+        if ( self::$rendered ) { return; }
+        echo $this->html();
+        self::$rendered = true;
+    }
+    public function shortcode(){
+        self::$rendered = true;
+        return $this->html();
+    }
 
     /** HTML del widget */
     protected function html(): string {
@@ -42,7 +55,7 @@ class Assistente_IA_Frontend {
             </div>
             <div id="assistente-ia-messaggi" class="assistente-ia-messaggi" aria-live="polite"></div>
             <div class="assistente-ia-inputarea">
-                <input id="assistente-ia-input" type="text" placeholder="Scrivi un messaggio…"/>
+                <textarea id="assistente-ia-input" rows="3" placeholder="Scrivi un messaggio…"></textarea>
                 <button id="assistente-ia-invia" type="button">Invia</button>
             </div>
         </div>
