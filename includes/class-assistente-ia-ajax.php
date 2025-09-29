@@ -148,8 +148,14 @@ class Assistente_IA_Ajax {
         if ( empty($hash) ) wp_send_json_success(['messaggi'=>[]]);
         $id_chat = $this->ottieni_o_crea_chat($hash);
         global $wpdb; $pref = $wpdb->prefix;
+        $tab = "{$pref}assistente_ia_messaggi";
+        $cols = $wpdb->get_col("SHOW COLUMNS FROM $tab", 0);
+        $col_from = in_array('mittente',$cols,true) ? 'mittente' : (in_array('ruolo',$cols,true) ? 'ruolo' : "'bot'");
+        $col_text = in_array('testo',$cols,true) ? 'testo' : (in_array('message',$cols,true) ? 'message' : "''");
+        $col_time = in_array('creato_il',$cols,true) ? 'creato_il' : (in_array('created_at',$cols,true) ? 'created_at' : 'NOW()');
+        
         $righe = $wpdb->get_results( $wpdb->prepare(
-            "SELECT mittente, testo, creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
+            "SELECT $col_from AS mittente, $col_text AS testo, $col_time AS creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
             $id_chat, $limite
         ), ARRAY_A );
         $righe = array_reverse( $righe ?: [] );
