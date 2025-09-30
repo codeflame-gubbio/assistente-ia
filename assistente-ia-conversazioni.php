@@ -24,6 +24,7 @@ require_once ASSIA_PATH . 'includes/class-assistente-ia-admin.php';
 require_once ASSIA_PATH . 'includes/class-assistente-ia-frontend.php';
 require_once ASSIA_PATH . 'includes/class-assistente-ia-ajax.php';
 require_once ASSIA_PATH . 'includes/class-assistente-ia-admin-rag.php';
+require_once ASSIA_PATH . 'includes/class-assistente-ia-content-selector.php';
 
 
 
@@ -33,7 +34,9 @@ if ( is_admin() ) {
             $GLOBALS['assia_ajax_instance'] = new Assistente_IA_Ajax();
         }
     }, 5);
-add_action('init', ['Assistente_IA_Admin_RAG','init']); }
+add_action('init', ['Assistente_IA_Admin_RAG','init']);
+add_action('init', ['Assistente_IA_Content_Selector','init']); // ← AGGIUNGI QUESTA RIGA
+}
 register_activation_hook( __FILE__, ['Assistente_IA_Installazione','all_attivazione'] );
 register_uninstall_hook( __FILE__, ['Assistente_IA_Installazione','alla_disinstallazione'] );
 

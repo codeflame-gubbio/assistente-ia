@@ -3,7 +3,9 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * RAG (embeddings) + diagnostica + job di rigenerazione a step con storico.
- * VERSIONE MIGLIORATA: Pulizia aggressiva del testo per evitare attributi shortcode negli embeddings
+ * VERSIONE CON SELEZIONE MANUALE CONTENUTI
+ * - Post/Pagine: solo quelli selezionati dall'admin
+ * - Prodotti WooCommerce: sempre inclusi automaticamente
  */
 class Assistente_IA_RAG {
 
@@ -64,28 +66,49 @@ class Assistente_IA_RAG {
         return implode("\n---\n", $estratti);
     }
 
-    /** Prepara un job di indicizzazione: post/pagine + (se presente) prodotti WooCommerce */
+    /** 
+     * Prepara un job di indicizzazione: 
+     * - Post/Pagine SELEZIONATI dall'admin
+     * - Prodotti WooCommerce (se presente) SEMPRE INCLUSI
+     */
     public static function prepara_job_indicizzazione(): array {
-        $q = new WP_Query([
-            'post_type'=>['post','page'],
-            'post_status'=>'publish',
-            'posts_per_page'=>-1,
-            'fields'=>'ids'
-        ]);
         $voci = [];
-        foreach( ($q->posts ?? []) as $pid ){
-            $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ];
+
+        // POST E PAGINE: Solo quelli selezionati
+        if ( class_exists('Assistente_IA_Content_Selector') ) {
+            $selected_ids = Assistente_IA_Content_Selector::get_selected_content_ids();
+        } else {
+            // Fallback: se la classe non è disponibile, prendi tutti i post/page pubblicati
+            $q = new WP_Query([
+                'post_type' => ['post', 'page'],
+                'post_status' => 'publish',
+                'numberposts' => -1,
+                'fields' => 'ids'
+            ]);
+            $selected_ids = $q->posts ?? [];
         }
 
+        // Valida che gli ID siano effettivamente pubblicati
+        foreach( $selected_ids as $pid ){
+            $pid = (int)$pid;
+            $status = get_post_status($pid);
+            $type = get_post_type($pid);
+            
+            if ( $status === 'publish' && in_array($type, ['post', 'page'], true) ) {
+                $voci[] = [ 'fonte' => 'post', 'id' => $pid ];
+            }
+        }
+
+        // PRODOTTI WOOCOMMERCE: Sempre inclusi automaticamente
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([
-                'post_type'=>['product'],
-                'post_status'=>'publish',
-                'posts_per_page'=>-1,
-                'fields'=>'ids'
+                'post_type' => ['product'],
+                'post_status' => 'publish',
+                'posts_per_page' => -1,
+                'fields' => 'ids'
             ]);
             foreach( ($qp->posts ?? []) as $pid ){
-                $voci[] = [ 'fonte'=>'prodotto', 'id'=>(int)$pid ];
+                $voci[] = [ 'fonte' => 'prodotto', 'id' => (int)$pid ];
             }
         }
 
@@ -188,7 +211,10 @@ class Assistente_IA_RAG {
         update_option('assia_log_embeddings', $log);
     }
 
-    /** Rigenerazione sincrona (legacy) */
+    /** 
+     * Rigenerazione sincrona (legacy) 
+     * Ora rispetta la selezione manuale dei contenuti
+     */
     public static function rigenera_indice_post(): int {
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) return 0;
 
@@ -224,10 +250,23 @@ class Assistente_IA_RAG {
             }
         };
 
-        $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-        foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
-        wp_reset_postdata();
+        // Post/Pagine selezionati
+        if ( class_exists('Assistente_IA_Content_Selector') ) {
+            $selected_ids = Assistente_IA_Content_Selector::get_selected_content_ids();
+        } else {
+            $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
+            $selected_ids = $q->posts ?? [];
+        }
 
+        foreach( $selected_ids as $pid ){ 
+            $pid = (int)$pid;
+            $status = get_post_status($pid);
+            if ( $status === 'publish' ) {
+                $processa('post', $pid); 
+            }
+        }
+
+        // Prodotti WooCommerce (sempre inclusi)
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
             foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
@@ -238,7 +277,7 @@ class Assistente_IA_RAG {
             'avviato_il' => $avvio,
             'completato_il' => current_time('mysql'),
             'modello' => $modello,
-            'tot_voci' => (int)(count($q->posts ?? []) + (self::woo_attivo() ? count($qp->posts ?? []) : 0)),
+            'tot_voci' => count($selected_ids) + (self::woo_attivo() ? count($qp->posts ?? []) : 0),
             'chunks_creati' => $conteggio,
             'errori' => $errori,
         ]);
@@ -323,47 +362,44 @@ class Assistente_IA_RAG {
         $renderizzato = apply_filters( 'the_content', $contenuto_espanso );
         
         // FASE 2: Pulizia AGGRESSIVA degli attributi shortcode residui
-        // Rimuovi pattern come: attribute="value" o attribute='value'
         $renderizzato = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $renderizzato);
         
-        // Rimuovi pattern page builder comuni (Divi, Elementor, etc)
+        // Rimuovi pattern page builder comuni
         $builder_patterns = [
-            '/\[et_pb_[^\]]*\]/i',           // Divi shortcodes
-            '/\[\/et_pb_[^\]]*\]/i',         // Divi closing
-            '/data-[a-zA-Z\-]+=["\'"][^"\']*["\']/i',  // data attributes
-            '/_builder_version=["\'][^"\']*["\']/i',   // builder version
-            '/custom_[a-zA-Z_]+=["\'][^"\']*["\']/i',  // custom attributes
-            '/global_colors_info=["\'][^"\']*["\']/i', // colors
-            '/\[vc_[^\]]*\]/i',              // Visual Composer
-            '/\[\/vc_[^\]]*\]/i',            // VC closing
-            '/\[elementor-[^\]]*\]/i',       // Elementor
+            '/\[et_pb_[^\]]*\]/i',
+            '/\[\/et_pb_[^\]]*\]/i',
+            '/data-[a-zA-Z\-]+=["\'"][^"\']*["\']/i',
+            '/_builder_version=["\'][^"\']*["\']/i',
+            '/custom_[a-zA-Z_]+=["\'][^"\']*["\']/i',
+            '/global_colors_info=["\'][^"\']*["\']/i',
+            '/\[vc_[^\]]*\]/i',
+            '/\[\/vc_[^\]]*\]/i',
+            '/\[elementor-[^\]]*\]/i',
         ];
         
         foreach( $builder_patterns as $pattern ){
             $renderizzato = preg_replace( $pattern, ' ', $renderizzato );
         }
         
-        // FASE 3: Rimuovi shortcode residui in modo più aggressivo
+        // FASE 3: Rimuovi shortcode residui
         $renderizzato = strip_shortcodes( $renderizzato );
-        // Forza rimozione shortcode non chiusi/malformati
         $renderizzato = preg_replace('/\[[^\]]*\]/i', ' ', $renderizzato);
         
-        // FASE 4: Pulisci script, style, commenti HTML
+        // FASE 4: Pulisci script, style, commenti
         $renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $renderizzato);
         $renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $renderizzato);
         $renderizzato = preg_replace('/<!--(.*)-->/Uis', '', $renderizzato);
         
-        // FASE 5: Estrai solo testo (rimuovi tutti i tag HTML)
+        // FASE 5: Estrai solo testo
         $testo = wp_strip_all_tags( $renderizzato );
         
-        // FASE 6: Pulizia finale spazi e caratteri speciali
-        $testo = preg_replace('/\s+/', ' ', $testo);           // Spazi multipli → singolo
-        $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo); // Caratteri controllo
+        // FASE 6: Pulizia finale spazi
+        $testo = preg_replace('/\s+/', ' ', $testo);
+        $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo);
         $testo = trim( $testo );
         
-        // FASE 7: Validazione - Se c'è ancora "sospetto" codice, segnala
+        // FASE 7: Validazione codice sospetto
         if ( preg_match('/[a-z_]+\s*=\s*["\']|width_|custom_|_builder_|global_/i', $testo) ) {
-            // Testo sospetto - prova pulizia finale più drastica
             $testo = preg_replace('/[a-z_]+\s*=\s*["\'][^"\']*["\']?/i', '', $testo);
             $testo = preg_replace('/\s+/', ' ', trim($testo));
         }
@@ -405,7 +441,6 @@ class Assistente_IA_RAG {
         $short_raw = $p->get_short_description();
         $short_rendered = do_shortcode( $short_raw );
         $short_rendered = apply_filters( 'the_content', $short_rendered );
-        // Pulizia attributi
         $short_rendered = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $short_rendered);
         $short_rendered = strip_shortcodes( $short_rendered );
         $short_rendered = preg_replace('/\[[^\]]*\]/i', ' ', $short_rendered);
@@ -416,7 +451,6 @@ class Assistente_IA_RAG {
         $desc_raw = $p->get_description();
         $desc_rendered = do_shortcode( $desc_raw );
         $desc_rendered = apply_filters( 'the_content', $desc_rendered );
-        // Pulizia attributi
         $desc_rendered = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $desc_rendered);
         $desc_rendered = strip_shortcodes( $desc_rendered );
         $desc_rendered = preg_replace('/\[[^\]]*\]/i', ' ', $desc_rendered);
