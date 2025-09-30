@@ -33,9 +33,14 @@
     const p = parseInt(s.percentuale||0,10);
     $('#assia-perc').text(p + '%');
     $('#assia-bar-fill').css('width', p + '%');
-    $('#assia-post').text((s.posts_done||0) + '/' + (s.posts_total||0) + ' post');
-    const chunksTxt = (s.chunks_total ? (s.chunks_done||0) + '/' + s.chunks_total : (s.chunks_done||0)) + ' chunks';
-    $('#assia-chunks').text(chunksTxt);
+    
+    // ✅ CORREZIONE: usa i nomi corretti dal job PHP
+    const indice = parseInt(s.indice || 0);
+    const totale = parseInt(s.totale || 0);
+    const creati = parseInt(s.creati || 0);
+    
+    $('#assia-post').text(indice + '/' + totale + ' voci');
+    $('#assia-chunks').text(creati + ' chunks');
   }
 
   function logAppend(rows){
@@ -88,16 +93,24 @@
         logAppend(s.log || []);
         lastUpdateTs = Date.now();
         
-        if(s.status === 'running' && !runningStep){
-          runningStep = true;
-          step().always(()=> runningStep = false);
+        // ✅ AUTO-ESECUZIONE STEP: se c'è un job in corso o in attesa, esegui step
+        if((s.stato === 'in_attesa' || s.stato === 'in_corso') && !runningStep){
+          const tot = parseInt(s.totale || 0);
+          const idx = parseInt(s.indice || 0);
+          
+          // Se non è completato, esegui step automaticamente
+          if(idx < tot){
+            runningStep = true;
+            step().always(()=> runningStep = false);
+          }
         }
         
-        if(s.status === 'done' || s.stato === 'completato'){
+        // ✅ COMPLETAMENTO
+        if(s.stato === 'completato'){
           clearInterval(polling);
           jobAttivo = false;
           $('#assia-avvia').prop('disabled', false).text('Avvia nuova rigenerazione');
-          appendInfo('✓ Rigenerazione completata!');
+          appendInfo('✓ Rigenerazione completata! Processati ' + (s.totale||0) + ' elementi, creati ' + (s.creati||0) + ' chunks.');
         }
       })
       .fail(xhr=> {
@@ -119,7 +132,21 @@
   }
 
   function step(){
+    appendInfo('Esecuzione step...');
     return ajaxPost('assia_embeddings_step', {})
+      .done(res=>{
+        if(!res || !res.success){
+          const errMsg = (res && res.data && res.data.errore) || 'step fallito';
+          appendErr('Step error: ' + errMsg);
+          return;
+        }
+        
+        const s = res.data || {};
+        appendInfo('Step completato: ' + (s.indice||0) + '/' + (s.totale||0) + ' voci, ' + (s.creati||0) + ' chunks');
+        
+        // Aggiorna lo stato visivo
+        drawState(s);
+      })
       .fail(xhr=> {
         const status = xhr && xhr.status ? xhr.status : 'unknown';
         appendErr('step FAIL ' + status);
@@ -129,7 +156,9 @@
   function watchdog(){
     if(!lastUpdateTs || !jobAttivo) return;
     const diff = Date.now() - lastUpdateTs;
+    // Se sono passati più di 10 secondi senza aggiornamenti, forza uno step
     if(diff > 10000 && !runningStep){
+      appendInfo('Watchdog: riprendo elaborazione...');
       runningStep = true;
       step().always(()=> runningStep = false);
     }
@@ -149,13 +178,20 @@
           return;
         }
         
-        jobAttivo = true; // ← IMPOSTA FLAG
+        jobAttivo = true;
         appendInfo('Job preparato: ' + (res.data.totale || 0) + ' voci da processare');
         
+        // Pulisci eventuali polling/watchdog precedenti
         if(polling) clearInterval(polling);
+        
+        // Avvia polling per controllare lo stato ogni 2.5 secondi
         polling = setInterval(stato, 2500);
+        
+        // Chiama stato() immediatamente per far partire il primo step
         stato();
-        setInterval(watchdog, 4000);
+        
+        // Avvia watchdog per recupero automatico se si blocca
+        setInterval(watchdog, 5000);
       })
       .fail(xhr=>{
         const status = xhr && xhr.status ? xhr.status : 'unknown';
@@ -174,8 +210,8 @@
           jobAttivo = true;
           appendInfo('Job in corso rilevato, riprendo il monitoraggio...');
           polling = setInterval(stato, 2500);
-          stato();
-          setInterval(watchdog, 4000);
+          stato(); // Chiamata immediata
+          setInterval(watchdog, 5000); // Watchdog ogni 5 secondi
         } else {
           // Nessun job, non serve polling
           appendInfo('Pronto. Nessun job in corso.');
@@ -184,6 +220,7 @@
       .fail(xhr=>{
         // Se fallisce la prima chiamata, non è critico
         console.warn('ASSIA RAG: Impossibile verificare stato iniziale');
+        appendInfo('Pronto. Clicca "Avvia rigenerazione" per iniziare.');
       });
   });
   

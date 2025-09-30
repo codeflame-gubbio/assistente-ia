@@ -60,31 +60,39 @@ class Assistente_IA_Ajax {
         wp_send_json_success(['messaggi'=>$righe,'id_chat'=>$id_chat]);
     }
 
-    /** Avvia job embeddings (lista post) */
-    public function embeddings_avvia(){
-
-        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
-        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
-        
-
-        if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
-        $job = Assistente_IA_RAG::prepara_job_indicizzazione();
-        wp_send_json_success( $job );
+  /** Avvia job embeddings (lista post) */
+public function embeddings_avvia(){
+    if ( ! current_user_can('manage_options') ) { 
+        wp_send_json_error(['msg'=>'no-cap'], 403); 
+    }
+    
+    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+        error_log('ASSIA RAG: bad-nonce in embeddings_avvia');
+        wp_send_json_error(['msg'=>'bad-nonce'], 403);
     }
 
-    /** Esegue uno step del job (batch N post) */
-    public function embeddings_step(){
+    $job = Assistente_IA_RAG::prepara_job_indicizzazione();
+    wp_send_json_success( $job );
+}
 
-        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
-        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
-        
-
-        if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
-        $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
-        $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
-        if ( isset($job['errore']) ) wp_send_json_error( $job );
-        wp_send_json_success( $job );
+/** Esegue uno step del job (batch N post) */
+public function embeddings_step(){
+    if ( ! current_user_can('manage_options') ) { 
+        wp_send_json_error(['msg'=>'no-cap'], 403); 
     }
+    
+    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+        error_log('ASSIA RAG: bad-nonce in embeddings_step');
+        wp_send_json_error(['msg'=>'bad-nonce'], 403);
+    }
+
+    $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
+    $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
+    if ( isset($job['errore']) ) wp_send_json_error( $job );
+    wp_send_json_success( $job );
+}
 
    /** Stato corrente del job */
 public function embeddings_stato(){
