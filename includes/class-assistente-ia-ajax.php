@@ -8,9 +8,8 @@ class Assistente_IA_Ajax {
 
     public function __construct(){
         
-        add_action('wp_ajax_assistente_ia_storico',       [ $this, 'storico' ] );
-        add_action('wp_ajax_nopriv_assistente_ia_storico',[ $this, 'storico' ] );
-        add_action('wp_ajax_assistente_ia_chat',[ $this,'gestisci_chat' ]);
+        add_action('wp_ajax_assia_ping', [ $this, 'assia_ping' ] );
+                  add_action('wp_ajax_assistente_ia_chat',[ $this,'gestisci_chat' ]);
         add_action('wp_ajax_nopriv_assistente_ia_chat',[ $this,'gestisci_chat' ]);
 
         add_action('wp_ajax_assistente_ia_recupera_chat',[ $this,'recupera_chat' ]);
@@ -25,7 +24,7 @@ class Assistente_IA_Ajax {
     public function gestisci_chat(){
         check_ajax_referer('assistente_ia_nonce','nonce');
 
-        $messaggio = isset($_POST['messaggio']) ? sanitize_textarea_field( wp_unslash($_POST['messaggio']) ) : '';
+        $messaggio=isset($_POST['messaggio'])?sanitize_text_field(wp_unslash($_POST['messaggio'])):'';
         $hash=isset($_POST['hash_sessione'])?sanitize_text_field(wp_unslash($_POST['hash_sessione'])):'';
         if(empty($messaggio)||empty($hash)) wp_send_json_error(['messaggio'=>'Richiesta non valida']);
         $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
@@ -68,6 +67,18 @@ class Assistente_IA_Ajax {
 
     /** Avvia job embeddings (lista post) */
     public function embeddings_avvia(){
+        // --- Admin-only bypass for nonce (temporary for diagnostics) ---
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( empty($nonce) || ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: embeddings_avvia bypass nonce (admin-only). Raw $_REQUEST: ' . print_r($_REQUEST, true));
+            // Do NOT block admin while we diagnose nonce propagation.
+        }
+    
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        
+
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
         $job = Assistente_IA_RAG::prepara_job_indicizzazione();
@@ -76,6 +87,18 @@ class Assistente_IA_Ajax {
 
     /** Esegue uno step del job (batch N post) */
     public function embeddings_step(){
+        // --- Admin-only bypass for nonce (temporary for diagnostics) ---
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( empty($nonce) || ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: embeddings_step bypass nonce (admin-only). Raw $_REQUEST: ' . print_r($_REQUEST, true));
+            // Do NOT block admin while we diagnose nonce propagation.
+        }
+    
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        
+
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
         $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
@@ -86,6 +109,18 @@ class Assistente_IA_Ajax {
 
     /** Stato corrente del job */
     public function embeddings_stato(){
+        // --- Admin-only bypass for nonce (temporary for diagnostics) ---
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( empty($nonce) || ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: embeddings_stato bypass nonce (admin-only). Raw $_REQUEST: ' . print_r($_REQUEST, true));
+            // Do NOT block admin while we diagnose nonce propagation.
+        }
+    
+        if ( ! current_user_can('manage_options') ) { wp_send_json_error(['msg'=>'no-cap'], 403); }
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        
+
         check_ajax_referer('assistente_ia_nonce','nonce');
         if ( ! current_user_can('manage_options') ) wp_send_json_error(['messaggio'=>'Permessi insufficienti']);
         $job = Assistente_IA_RAG::stato_job();
@@ -162,4 +197,16 @@ class Assistente_IA_Ajax {
         }
         wp_send_json_success(['messaggi'=>$messaggi]);
     }
+
+public function assia_ping(){
+    if ( ! current_user_can('manage_options') ) {
+        wp_send_json_error(['msg'=>'no-cap'], 403);
+    }
+    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+        wp_send_json_error(['msg'=>'bad-nonce'], 403);
+    }
+    wp_send_json_success([ 'ok' => 1, 'time' => time() ]);
+}
+
 }

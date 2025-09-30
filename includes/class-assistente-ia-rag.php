@@ -399,15 +399,4 @@ class Assistente_IA_RAG {
         $den = (sqrt($na)*sqrt($nb));
         return $den>0 ? ($dot/$den) : 0.0;
     }
-
-protected static function estrai_keywords(string $query): array {
-    $stop = ['il','lo','la','i','gli','le','un','uno','una','di','a','da','in','con','su','per','tra','fra','del','della','dei','degli','delle','al','alla','ai','agli','alle','è','sono','che','come','quando','dove','perché'];
-    $parole = preg_split('/\s+/', strtolower(trim($query)));
-    $out = [];
-    foreach($parole as $p){
-        $p = trim($p, '.,;:!?\"\'()[]{}');
-        if (strlen($p)>2 && !in_array($p,$stop,true)){ $out[] = $p; }
-    }
-    return array_values(array_unique($out));
-}
 }

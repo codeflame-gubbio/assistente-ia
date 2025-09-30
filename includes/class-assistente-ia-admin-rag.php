@@ -1,142 +1,102 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) { exit; }
+if ( ! defined('ABSPATH') ) exit;
 
-/**
- * Pannello "RAG (Embeddings)" – attivazione, Top-K, solo migliore.
- * Sottomenu sotto il menu principale dell'Assistente IA.
- */
 class Assistente_IA_Admin_RAG {
 
-    /** Bootstrap */
+    /**
+     * Hook di bootstrap: registra il sottomenu RAG
+     */
     public static function init(){
-        // Inizializza default se mancanti (non tocca altri flussi)
-        if ( get_option('assia_attiva_embeddings', null) === null ) add_option('assia_attiva_embeddings','si');
-        if ( get_option('assia_embeddings_top_k', null) === null ) add_option('assia_embeddings_top_k',5);
-        if ( get_option('assia_embeddings_solo_migliori', null) === null ) add_option('assia_embeddings_solo_migliori','no');
-
+        // Priorità alta per essere sicuri che il menu padre sia già registrato
         add_action('admin_menu', [ __CLASS__, 'aggiungi_sottomenu_rag' ], 99);
-        add_action('admin_init', [ __CLASS__, 'registra_impostazioni_rag' ]);
     }
 
-    /** Aggiunge la voce di sottomenu */
+    /**
+     * Aggiunge il sottomenu RAG sotto il menu principale "Assistente IA"
+     */
     public static function aggiungi_sottomenu_rag(){
-        
-        $parent = 'assia';
-        $slug   = 'assistente-ia-rag';
-        if ( strpos($slug, '/') !== false || str_ends_with($slug, '.php') ) return;
-        $slug_padre = 'assia'; // Cambia se il tuo slug principale è diverso
-        add_submenu_page($parent, 'RAG (Embeddings)', 'RAG (Embeddings)', 'manage_options', $slug,
-            [ __CLASS__, 'render_pagina_rag' ]
+        $parent = 'assia';               // slug del menu top-level
+        $slug   = 'assistente-ia-rag';   // slug della pagina RAG (senza slash / e senza .php)
+
+        // Guard-rail: blocca slug errati (compatibile PHP 7)
+        if ( strpos($slug, '/') !== false || substr($slug, -4) === '.php' ) {
+            return;
+        }
+
+        add_submenu_page(
+            $parent,
+            'RAG (Embeddings)',          // page title
+            'RAG (Embeddings)',          // menu title
+            'manage_options',            // capability
+            $slug,                       // menu_slug
+            [ __CLASS__, 'render' ]      // callback
         );
+
+        // Fix di sicurezza: forza comunque lo slug corretto nel menu generato da WP
+        add_action('admin_head', function() use ($parent, $slug){
+            global $submenu;
+            if ( isset($submenu[$parent]) && is_array($submenu[$parent]) ) {
+                foreach ($submenu[$parent] as &$item) {
+                    // $item[2] = menu_slug
+                    if ( isset($item[2]) && ( $item[2] === $slug || strpos($item[2], $slug) !== false ) ) {
+                        $item[2] = $slug;
+                    }
+                }
+            }
+        });
     }
 
-    /** Registra opzioni e campi */
-    public static function registra_impostazioni_rag(){
-
-        // Gruppo impostazioni
-        register_setting('assia_rag', 'assia_attiva_embeddings', [
-            'type' => 'string',
-            'sanitize_callback' => function($v){ return ($v==='si' ? 'si' : 'no'); },
-            'default' => 'si'
-        ]);
-
-        register_setting('assia_rag', 'assia_embeddings_top_k', [
-            'type' => 'integer',
-            'sanitize_callback' => function($v){
-                $n = (int) $v;
-                if ($n < 1)  $n = 1;
-                if ($n > 20) $n = 20;
-                return $n;
-            },
-            'default' => 5
-        ]);
-
-        register_setting('assia_rag', 'assia_embeddings_solo_migliori', [
-            'type' => 'string',
-            'sanitize_callback' => function($v){ return ($v==='si' ? 'si' : 'no'); },
-            'default' => 'no'
-        ]);
-
-        // Sezione descrittiva
-        add_settings_section(
-            'assia_sezione_rag',
-            'RAG (Embeddings)',
-            function(){
-                echo '<p>Configura l’indicizzazione e il recupero dei contenuti del sito (RAG). '.
-                     'Dopo aver salvato, rigenera l’indice in <em>Assistente IA → Diagnostica</em>.</p>';
-            },
-            'assistente-ia-rag'
-        );
-
-        // Campo: Attiva RAG
-        add_settings_field(
-            'assia_attiva_embeddings',
-            'Attiva RAG',
-            function(){
-                $val = get_option('assia_attiva_embeddings','si'); ?>
-                <label><input type="radio" name="assia_attiva_embeddings" value="si" <?php checked('si',$val); ?>> Sì</label>
-                &nbsp;&nbsp;
-                <label><input type="radio" name="assia_attiva_embeddings" value="no" <?php checked('no',$val); ?>> No</label>
-                <p class="description">Se disattivi, il bot non userà gli embeddings (solo prompt puro / fallback, se presente).</p>
-                <?php
-            },
-            'assistente-ia-rag',
-            'assia_sezione_rag'
-        );
-
-        // Campo: Top-K
-        add_settings_field(
-            'assia_embeddings_top_k',
-            'Top-K (numero estratti)',
-            function(){
-                $val = (int) get_option('assia_embeddings_top_k', 5); ?>
-                <input type="number" min="1" max="20" name="assia_embeddings_top_k" value="<?php echo esc_attr($val); ?>" />
-                <p class="description">Quanti estratti pertinenti passare al modello (consigliato 3–7 per qualità/costo).</p>
-                <?php
-            },
-            'assistente-ia-rag',
-            'assia_sezione_rag'
-        );
-
-        // Campo: Solo il migliore
-        add_settings_field(
-            'assia_embeddings_solo_migliori',
-            'Usa solo il migliore',
-            function(){
-                $val = get_option('assia_embeddings_solo_migliori','no'); ?>
-                <label><input type="radio" name="assia_embeddings_solo_migliori" value="si" <?php checked('si',$val); ?>> Sì</label>
-                &nbsp;&nbsp;
-                <label><input type="radio" name="assia_embeddings_solo_migliori" value="no" <?php checked('no',$val); ?>> No</label>
-                <p class="description">Se “Sì”, passa solo il miglior estratto. Con “No”, passa Top-K estratti (di solito più utile).</p>
-                <?php
-            },
-            'assistente-ia-rag',
-            'assia_sezione_rag'
-        );
-    }
-
-    /** Rendering della pagina */
-    public static function render_pagina_rag(){
-        if ( ! current_user_can('manage_options') ) { return; } ?>
-        <div class="wrap">
-            <h1>RAG (Embeddings)</h1>
-            <form method="post" action="options.php">
-                <?php
-                    settings_fields('assia_rag');
-                    do_settings_sections('assistente-ia-rag');
-                    submit_button('Salva impostazioni');
-                ?>
-            </form>
-            <hr>
-            <p><strong>Nota:</strong> dopo il salvataggio vai in <em>Assistente IA → Diagnostica</em> e
-               <strong>rigenera l’indice</strong> per aggiornare gli embeddings.</p>
-        </div>
-        <?php
-    }
-
+    /**
+     * Render della pagina RAG (UI completa con JS e progress bar)
+     */
     public static function render(){
-        
-        echo '<div class="wrap"><h1>RAG (Embeddings)</h1><p>Gestione embeddings.</p></div>';
-    
+        if ( ! current_user_can('manage_options') ) {
+            wp_die( __('Non hai i permessi per accedere a questa pagina.', 'assistente-ia') );
+        }
+
+        // Nonce per le azioni AJAX del job RAG
+        $nonce = wp_create_nonce('assia_rag_nonce');
+
+        // Enqueue JS admin per la pagina RAG
+        wp_enqueue_script(
+            'assia-rag-admin',
+            ASSIA_URL . 'admin/js/assia-rag-admin.js',
+            [ 'jquery' ],
+            defined('ASSIA_VERSIONE') ? ASSIA_VERSIONE : '1.0.0',
+            true
+        );
+
+        wp_localize_script('assia-rag-admin', 'AssiaRag', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce'    => $nonce,
+        ]);
+
+        // Stili minimi inline (se preferisci, spostali in un CSS)
+        echo '<style>
+            .assia-rag-wrap{max-width:860px}
+            .assia-bar{height:16px;background:#e5e7eb;border-radius:8px;overflow:hidden;margin:6px 0 12px}
+            .assia-bar>span{display:block;height:100%;width:0%;background:#10b981;transition:width .3s}
+            .assia-log{background:#0b1020;color:#d1e7ff;padding:10px;border-radius:6px;height:220px;overflow:auto;font:12px/1.4 monospace}
+            .assia-meta{color:#374151;margin-bottom:6px}
+            .assia-btn{background:#111827;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer}
+            .assia-btn[disabled]{opacity:.5;cursor:not-allowed}
+            .assia-hint{font-size:12px;color:#6b7280;margin-top:8px}
+        </style>';
+
+        // Markup UI
+        echo '<div class="wrap assia-rag-wrap">
+            <h1>RAG (Embeddings)</h1>
+            <p class="assia-meta">Rigenera gli embeddings dei contenuti pubblicati. L’operazione procede a piccoli step via AJAX.</p>
+
+            <button id="assia-avvia" class="assia-btn">Avvia rigenerazione</button>
+            <div class="assia-bar"><span id="assia-bar-fill"></span></div>
+            <div class="assia-meta">
+                <span id="assia-perc">0%</span> ·
+                <span id="assia-post">0/0 post</span> ·
+                <span id="assia-chunks">0 chunks</span>
+            </div>
+            <div id="assia-log" class="assia-log"></div>
+            <p class="assia-hint">Se la barra resta ferma, controlla la Console/Network o il log PHP.</p>
+        </div>';
     }
 }

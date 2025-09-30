@@ -5,16 +5,6 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  * Widget chat front-end + shortcode [assistente_ia]
  */
 class Assistente_IA_Frontend {
-    protected static function get_hash_sessione(){
-        $cookie = isset($_COOKIE['assia_hash']) ? sanitize_text_field($_COOKIE['assia_hash']) : '';
-        if ( ! $cookie ) {
-            $cookie = wp_generate_uuid4();
-            setcookie('assia_hash', $cookie, time()+3600*24*365, COOKIEPATH, COOKIE_DOMAIN, is_ssl(), true);
-            $_COOKIE['assia_hash'] = $cookie;
-        }
-        return $cookie;
-    }
-
     private static $rendered = false;
 
     public function __construct(){
