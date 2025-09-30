@@ -4,13 +4,15 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 /**
  * RAG (embeddings) + diagnostica + job di rigenerazione a step con storico.
  * Esteso: contenuto renderizzato (builder/shortcode) + fallback keyword su DB + WooCommerce.
+ * Fix rendering page builder con setup_postdata per Divi, Elementor, ecc.
  */
 class Assistente_IA_RAG {
 
     /** Recupera estratti pertinenti dal DB con similarità coseno (Top-K) + fallback keyword */
     public static function recupera_estratti_rag( string $domanda ): string {
         $k = (int) get_option('assia_embeddings_top_k', 3);
-    if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
+        
+        if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
             // Embeddings OFF → fallback diretto
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
@@ -301,6 +303,7 @@ class Assistente_IA_RAG {
         }
         return implode("\n---\n", $pulite);
     }
+    
     protected static function schede_to_array( array $schede ): array {
         if ( empty($schede) ) return [];
         $pulite = [];
@@ -310,35 +313,103 @@ class Assistente_IA_RAG {
         return $pulite;
     }
 
-    /** ------ Estrazione testo da POST/PAGINA (renderizzato) ------ */
+    /** ------ Estrazione testo da POST/PAGINA (renderizzato con fix page builder) ------ */
     protected static function testo_da_post( int $pid ): string {
         $titolo   = get_the_title( $pid );
         $estratto = get_the_excerpt( $pid );
-        $contenuto_raw = get_post_field( 'post_content', $pid );
-        // Renderizza (espande shortcode, blocchi, builder)
-        $renderizzato = apply_filters( 'the_content', $contenuto_raw );
+        
+        // Setup del post per attivare correttamente i page builder
+        global $post;
+        $post_originale = $post;
+        $post = get_post( $pid );
+        
+        if ( ! $post ) {
+            return '';
+        }
+        
+        setup_postdata( $post );
+        
+        $contenuto_raw = $post->post_content;
+        
+        // 1) Prima espandi gli shortcode esplicitamente
+        $contenuto_espanso = do_shortcode( $contenuto_raw );
+        
+        // 2) Poi applica i filtri the_content (Gutenberg, builder, ecc.)
+        $renderizzato = apply_filters( 'the_content', $contenuto_espanso );
+        
+        // 3) Rimuovi eventuali shortcode non renderizzati (fallback)
+        $renderizzato = strip_shortcodes( $renderizzato );
+        
+        // 4) Pulisci HTML e script
+        $renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $renderizzato);
+        $renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $renderizzato);
+        
+        // 5) Estrai solo il testo
         $testo = wp_strip_all_tags( $renderizzato );
+        
+        // 6) Rimuovi spazi multipli e newline eccessivi
+        $testo = preg_replace('/\s+/', ' ', $testo);
+        $testo = trim( $testo );
+        
+        // Ripristina il post originale
+        wp_reset_postdata();
+        $post = $post_originale;
+        
+        // Pulisci anche l'estratto
         $estratto = wp_strip_all_tags( $estratto );
-        $link  = get_permalink( $pid );
+        $estratto = preg_replace('/\s+/', ' ', trim($estratto));
+        
+        $link = get_permalink( $pid );
 
+        // Costruisci il risultato
         $blocchi = [];
-        if($titolo)   $blocchi[] = "Titolo: ".$titolo;
-        if($estratto) $blocchi[] = "Estratto: ".$estratto;
-        if($testo)    $blocchi[] = "Contenuto: ".$testo;
-        if($link)     $blocchi[] = "Link: ".$link;
+        if ( $titolo ) $blocchi[] = "Titolo: " . $titolo;
+        if ( $estratto ) $blocchi[] = "Estratto: " . $estratto;
+        if ( $testo ) $blocchi[] = "Contenuto: " . $testo;
+        if ( $link ) $blocchi[] = "Link: " . $link;
 
-        return trim( implode("\n", $blocchi) );
+        $risultato = trim( implode("\n", $blocchi) );
+        
+        // Applica filtro per personalizzazioni (esempio: rimozione di pattern specifici)
+        $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
+        
+        return $risultato;
     }
 
-    /** ------ Testo descrittivo del prodotto WooCommerce ------ */
+    /** ------ Testo descrittivo del prodotto WooCommerce (con fix page builder) ------ */
     protected static function costruisci_testo_prodotto( int $product_id ): string {
         if ( ! self::woo_attivo() ) return '';
         $p = wc_get_product( $product_id );
         if ( ! $p ) return '';
 
+        // Setup del post per il rendering corretto
+        global $post;
+        $post_originale = $post;
+        $post = get_post( $product_id );
+        setup_postdata( $post );
+
         $nome   = get_the_title( $product_id );
-        $short  = wp_strip_all_tags( $p->get_short_description() );
-        $desc   = wp_strip_all_tags( $p->get_description() );
+        
+        // Short description con rendering
+        $short_raw = $p->get_short_description();
+        $short_rendered = do_shortcode( $short_raw );
+        $short_rendered = apply_filters( 'the_content', $short_rendered );
+        $short_rendered = strip_shortcodes( $short_rendered );
+        $short = wp_strip_all_tags( $short_rendered );
+        $short = preg_replace('/\s+/', ' ', trim($short));
+        
+        // Description con rendering
+        $desc_raw = $p->get_description();
+        $desc_rendered = do_shortcode( $desc_raw );
+        $desc_rendered = apply_filters( 'the_content', $desc_rendered );
+        $desc_rendered = strip_shortcodes( $desc_rendered );
+        $desc = wp_strip_all_tags( $desc_rendered );
+        $desc = preg_replace('/\s+/', ' ', trim($desc));
+        
+        // Ripristina
+        wp_reset_postdata();
+        $post = $post_originale;
+        
         $prezzo = method_exists($p,'get_price') ? $p->get_price() : '';
         $valuta = function_exists('get_woocommerce_currency_symbol') ? get_woocommerce_currency_symbol() : '€';
         $stock  = method_exists($p,'is_in_stock') ? ($p->is_in_stock() ? 'disponibile' : 'non disponibile') : '';
@@ -355,7 +426,12 @@ class Assistente_IA_RAG {
         if($desc)  $righe[] = "Descrizione: {$desc}";
         if($link)  $righe[] = "Link: {$link}";
 
-        return trim( implode("\n", array_filter($righe)) );
+        $risultato = trim( implode("\n", array_filter($righe)) );
+        
+        // Applica filtro per personalizzazioni
+        $risultato = apply_filters( 'assia_rag_testo_prodotto', $risultato, $product_id );
+        
+        return $risultato;
     }
 
     /** WooCommerce presente? */
@@ -363,7 +439,7 @@ class Assistente_IA_RAG {
         return class_exists('WooCommerce') || function_exists('wc_get_product');
     }
 
-    /** Spezza testo in chunk “quasi parola” da N caratteri */
+    /** Spezza testo in chunk "quasi parola" da N caratteri */
     protected static function spezza_testo( string $t, int $n ): array {
         $ris = [];
         $t = trim($t);

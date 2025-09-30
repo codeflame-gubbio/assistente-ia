@@ -6,7 +6,7 @@
       const box = $('#assia-log');
       box.append('[ERRORE] ' + msg + '\n');
       box.scrollTop(box[0].scrollHeight);
-      console.error('ASSIA RAG:', msg); // Debug aggiuntivo
+      console.error('ASSIA RAG:', msg);
     } catch(e){ console.error(msg); }
   }
 
@@ -26,15 +26,18 @@
     return $.post(AssiaRag.ajax_url, data);
   }
 
-  let polling = null, runningStep = false, lastUpdateTs = 0;
-  let jobAttivo = false; // ← NUOVO: flag per sapere se c'è un job
+  let polling = null;
+  let runningStep = false;
+  let lastUpdateTs = 0;
+  let jobAttivo = false;
+  let watchdogInterval = null; // ← Traccia il watchdog per evitare duplicati
 
   function drawState(s){
     const p = parseInt(s.percentuale||0,10);
     $('#assia-perc').text(p + '%');
     $('#assia-bar-fill').css('width', p + '%');
     
-    // ✅ CORREZIONE: usa i nomi corretti dal job PHP
+    // Usa i nomi corretti dal job PHP
     const indice = parseInt(s.indice || 0);
     const totale = parseInt(s.totale || 0);
     const creati = parseInt(s.creati || 0);
@@ -56,15 +59,14 @@
   function stato(){
     return ajaxPost('assia_embeddings_stato', {})
       .done(res=>{
-        // ✅ GESTIONE MIGLIORATA DELLO STATO
+        // Gestione migliorata dello stato
         if(!res || !res.success){ 
-          // Se non c'è success, ma non è un errore critico
           if(res && res.data && res.data.msg === 'bad-nonce'){
             appendErr('stato: nonce non valido. Ricarica la pagina.');
             clearInterval(polling);
+            if(watchdogInterval) clearInterval(watchdogInterval);
             return;
           }
-          // Non logghiamo errore se semplicemente non c'è un job
           if(!jobAttivo){
             console.log('ASSIA RAG: Nessun job attivo (normale)');
             return;
@@ -75,25 +77,25 @@
         
         const s = res.data || {};
         
-        // ✅ GESTIONE STATO "nessun_job"
+        // Gestione stato "nessun_job"
         if(s.stato === 'nessun_job'){
           if(jobAttivo){
             appendInfo('Job completato o interrotto');
             jobAttivo = false;
             clearInterval(polling);
+            if(watchdogInterval) clearInterval(watchdogInterval);
             $('#assia-avvia').prop('disabled', false).text('Avvia rigenerazione');
           }
-          // Non è un errore, semplicemente non c'è un job
           return;
         }
         
-        // ✅ Job attivo trovato
+        // Job attivo trovato
         jobAttivo = true;
         drawState(s);
         logAppend(s.log || []);
         lastUpdateTs = Date.now();
         
-        // ✅ AUTO-ESECUZIONE STEP: se c'è un job in corso o in attesa, esegui step
+        // AUTO-ESECUZIONE STEP: se c'è un job in corso o in attesa, esegui step
         if((s.stato === 'in_attesa' || s.stato === 'in_corso') && !runningStep){
           const tot = parseInt(s.totale || 0);
           const idx = parseInt(s.indice || 0);
@@ -105,9 +107,10 @@
           }
         }
         
-        // ✅ COMPLETAMENTO
+        // Completamento
         if(s.stato === 'completato'){
           clearInterval(polling);
+          if(watchdogInterval) clearInterval(watchdogInterval);
           jobAttivo = false;
           $('#assia-avvia').prop('disabled', false).text('Avvia nuova rigenerazione');
           appendInfo('✓ Rigenerazione completata! Processati ' + (s.totale||0) + ' elementi, creati ' + (s.creati||0) + ' chunks.');
@@ -117,10 +120,10 @@
         const status = xhr && xhr.status ? xhr.status : 'unknown';
         const responseText = xhr && xhr.responseText ? xhr.responseText : '';
         
-        // ✅ GESTIONE ERRORI HTTP DETTAGLIATA
         if(status === 403){
           appendErr('stato FAIL 403: Permessi insufficienti o sessione scaduta. Ricarica la pagina.');
           clearInterval(polling);
+          if(watchdogInterval) clearInterval(watchdogInterval);
         } else if(status === 500){
           appendErr('stato FAIL 500: Errore server. Controlla i log PHP.');
           console.error('Response:', responseText);
@@ -183,6 +186,7 @@
         
         // Pulisci eventuali polling/watchdog precedenti
         if(polling) clearInterval(polling);
+        if(watchdogInterval) clearInterval(watchdogInterval);
         
         // Avvia polling per controllare lo stato ogni 2.5 secondi
         polling = setInterval(stato, 2500);
@@ -191,7 +195,7 @@
         stato();
         
         // Avvia watchdog per recupero automatico se si blocca
-        setInterval(watchdog, 5000);
+        watchdogInterval = setInterval(watchdog, 5000);
       })
       .fail(xhr=>{
         const status = xhr && xhr.status ? xhr.status : 'unknown';
@@ -200,7 +204,7 @@
       });
   });
 
-  // ✅ POLLING INIZIALE SOLO SE C'È UN JOB ATTIVO
+  // Polling iniziale solo se c'è un job attivo
   $(function(){
     // Prima verifica se c'è un job attivo
     ajaxPost('assia_embeddings_stato', {})
@@ -209,9 +213,13 @@
           // Job attivo trovato, avvia polling
           jobAttivo = true;
           appendInfo('Job in corso rilevato, riprendo il monitoraggio...');
+          
+          if(polling) clearInterval(polling);
+          if(watchdogInterval) clearInterval(watchdogInterval);
+          
           polling = setInterval(stato, 2500);
           stato(); // Chiamata immediata
-          setInterval(watchdog, 5000); // Watchdog ogni 5 secondi
+          watchdogInterval = setInterval(watchdog, 5000);
         } else {
           // Nessun job, non serve polling
           appendInfo('Pronto. Nessun job in corso.');
