@@ -3,8 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * RAG (embeddings) + diagnostica + job di rigenerazione a step con storico.
- * Esteso: contenuto renderizzato (builder/shortcode) + fallback keyword su DB + WooCommerce.
- * Fix rendering page builder con setup_postdata per Divi, Elementor, ecc.
+ * VERSIONE MIGLIORATA: Pulizia aggressiva del testo per evitare attributi shortcode negli embeddings
  */
 class Assistente_IA_RAG {
 
@@ -13,27 +12,22 @@ class Assistente_IA_RAG {
         $k = (int) get_option('assia_embeddings_top_k', 3);
         
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
-            // Embeddings OFF → fallback diretto
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
         }
 
-        $k     = (int) get_option('assia_embeddings_top_k', 3);
         $sigla = get_option('assia_modello_embedding','text-embedding-005');
 
-        // 1) Embedding della domanda (log su DB; chat/hash sconosciuti qui)
         $emb = Assistente_IA_Modello_Vertex::calcola_embedding(
             Assistente_IA_Utilita::pulisci_testo($domanda),
             [ 'id_chat' => null, 'hash_sessione' => null ]
         );
         if ( empty($emb['vettore']) ) {
-            // Se embedding fallisce → fallback keyword
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
         }
         $vq = $emb['vettore'];
 
-        // 2) Similarità sui chunks indicizzati
         global $wpdb; $pref = $wpdb->prefix;
         $righe = $wpdb->get_results( $wpdb->prepare(
             "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s",
@@ -57,17 +51,12 @@ class Assistente_IA_RAG {
             $estratti[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($p['testo']), 1200 );
         }
 
-        // 3) Fallback keyword se:
-        //    - non abbiamo trovato nulla con embeddings, OPPURE
-        //    - la domanda è molto corta (<= 3 parole) OPPURE
-        //    - lo score migliore è basso (< 0.20)
         $parole = preg_split('/\s+/', trim($domanda));
         $short  = ( is_array($parole) && count($parole) <= 3 );
         $best   = isset($punteggi[0]['score']) ? (float)$punteggi[0]['score'] : 0.0;
 
         if ( empty($estratti) || $short || $best < 0.20 ){
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
-            // concateniamo i risultati del fallback agli estratti (senza duplicare)
             $estratti_fb = self::schede_to_array( $schede );
             $estratti    = array_values( array_filter( array_unique( array_merge($estratti_fb, $estratti) ) ) );
         }
@@ -77,7 +66,6 @@ class Assistente_IA_RAG {
 
     /** Prepara un job di indicizzazione: post/pagine + (se presente) prodotti WooCommerce */
     public static function prepara_job_indicizzazione(): array {
-        // Post/Pagine
         $q = new WP_Query([
             'post_type'=>['post','page'],
             'post_status'=>'publish',
@@ -89,7 +77,6 @@ class Assistente_IA_RAG {
             $voci[] = [ 'fonte'=>'post', 'id'=>(int)$pid ];
         }
 
-        // Prodotti WooCommerce (se attivo)
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([
                 'post_type'=>['product'],
@@ -108,7 +95,7 @@ class Assistente_IA_RAG {
             'indice' => 0,
             'creati' => 0,
             'modello' => get_option('assia_modello_embedding','text-embedding-005'),
-            'voci' => $voci, // ← ogni voce ha fonte+id
+            'voci' => $voci,
             'avviato_il' => current_time('mysql'),
             'completato_il' => null,
             'errori' => [],
@@ -136,13 +123,11 @@ class Assistente_IA_RAG {
             $pid   = (int)($voce['id'] ?? 0);
             if ( $pid <= 0 ) continue;
 
-            // Cancella vecchi embeddings della voce
             $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$pref}assistente_ia_embeddings WHERE fonte=%s AND id_riferimento=%d AND modello=%s",
                 $fonte, $pid, $modello
             ) );
 
-            // Testo sorgente
             $testo = ( $fonte === 'prodotto' )
                 ? self::costruisci_testo_prodotto( $pid )
                 : self::testo_da_post( $pid );
@@ -152,12 +137,14 @@ class Assistente_IA_RAG {
             $chunks = self::spezza_testo( $testo, 800 );
             $indice_chunk = 0;
             foreach( $chunks as $ch ){
-                // Embedding loggato su DB (indicizzazione offline)
                 $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [
                     'id_chat' => null,
                     'hash_sessione' => null
                 ] );
-                if ( empty($emb['vettore']) ) { $job['errori'][] = "Embedding vuoto per {$fonte} {$pid}"; continue; }
+                if ( empty($emb['vettore']) ) { 
+                    $job['errori'][] = "Embedding vuoto per {$fonte} {$pid}"; 
+                    continue; 
+                }
                 self::salva_embedding( $fonte, $pid, $indice_chunk++, $ch, $emb['vettore'], $modello );
                 $job['creati']++;
             }
@@ -201,7 +188,7 @@ class Assistente_IA_RAG {
         update_option('assia_log_embeddings', $log);
     }
 
-    /** Rigenerazione sincrona (legacy) – ora anche prodotti e contenuto renderizzato */
+    /** Rigenerazione sincrona (legacy) */
     public static function rigenera_indice_post(): int {
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) return 0;
 
@@ -214,7 +201,6 @@ class Assistente_IA_RAG {
         $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
             if ( $pid <= 0 ) return;
 
-            // Cancella vecchi embeddings
             $wpdb->query( $wpdb->prepare(
                 "DELETE FROM {$pref}assistente_ia_embeddings WHERE fonte=%s AND id_riferimento=%d AND modello=%s",
                 $fonte, $pid, $modello
@@ -238,12 +224,10 @@ class Assistente_IA_RAG {
             }
         };
 
-        // Post/Pagine
         $q = new WP_Query([ 'post_type'=>['post','page'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
         foreach( ($q->posts ?? []) as $pid ){ $processa('post', (int)$pid); }
         wp_reset_postdata();
 
-        // Prodotti WooCommerce
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
             foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
@@ -267,7 +251,6 @@ class Assistente_IA_RAG {
         $q = trim( wp_strip_all_tags( $query ) );
         if ( $q === '' ) return [];
 
-        // Ricerco su post/page/product pubblicati
         $like = '%' . $wpdb->esc_like( $q ) . '%';
         $sql = "
             SELECT ID, post_type
@@ -313,12 +296,16 @@ class Assistente_IA_RAG {
         return $pulite;
     }
 
-    /** ------ Estrazione testo da POST/PAGINA (renderizzato con fix page builder) ------ */
+    /** 
+     * ========================================
+     * ESTRAZIONE TESTO DA POST/PAGINA
+     * VERSIONE MIGLIORATA: Pulizia aggressiva
+     * ======================================== 
+     */
     protected static function testo_da_post( int $pid ): string {
         $titolo   = get_the_title( $pid );
         $estratto = get_the_excerpt( $pid );
         
-        // Setup del post per attivare correttamente i page builder
         global $post;
         $post_originale = $post;
         $post = get_post( $pid );
@@ -331,37 +318,64 @@ class Assistente_IA_RAG {
         
         $contenuto_raw = $post->post_content;
         
-        // 1) Prima espandi gli shortcode esplicitamente
+        // FASE 1: Espandi shortcode e applica filtri content
         $contenuto_espanso = do_shortcode( $contenuto_raw );
-        
-        // 2) Poi applica i filtri the_content (Gutenberg, builder, ecc.)
         $renderizzato = apply_filters( 'the_content', $contenuto_espanso );
         
-        // 3) Rimuovi eventuali shortcode non renderizzati (fallback)
-        $renderizzato = strip_shortcodes( $renderizzato );
+        // FASE 2: Pulizia AGGRESSIVA degli attributi shortcode residui
+        // Rimuovi pattern come: attribute="value" o attribute='value'
+        $renderizzato = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $renderizzato);
         
-        // 4) Pulisci HTML e script
+        // Rimuovi pattern page builder comuni (Divi, Elementor, etc)
+        $builder_patterns = [
+            '/\[et_pb_[^\]]*\]/i',           // Divi shortcodes
+            '/\[\/et_pb_[^\]]*\]/i',         // Divi closing
+            '/data-[a-zA-Z\-]+=["\'"][^"\']*["\']/i',  // data attributes
+            '/_builder_version=["\'][^"\']*["\']/i',   // builder version
+            '/custom_[a-zA-Z_]+=["\'][^"\']*["\']/i',  // custom attributes
+            '/global_colors_info=["\'][^"\']*["\']/i', // colors
+            '/\[vc_[^\]]*\]/i',              // Visual Composer
+            '/\[\/vc_[^\]]*\]/i',            // VC closing
+            '/\[elementor-[^\]]*\]/i',       // Elementor
+        ];
+        
+        foreach( $builder_patterns as $pattern ){
+            $renderizzato = preg_replace( $pattern, ' ', $renderizzato );
+        }
+        
+        // FASE 3: Rimuovi shortcode residui in modo più aggressivo
+        $renderizzato = strip_shortcodes( $renderizzato );
+        // Forza rimozione shortcode non chiusi/malformati
+        $renderizzato = preg_replace('/\[[^\]]*\]/i', ' ', $renderizzato);
+        
+        // FASE 4: Pulisci script, style, commenti HTML
         $renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $renderizzato);
         $renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $renderizzato);
+        $renderizzato = preg_replace('/<!--(.*)-->/Uis', '', $renderizzato);
         
-        // 5) Estrai solo il testo
+        // FASE 5: Estrai solo testo (rimuovi tutti i tag HTML)
         $testo = wp_strip_all_tags( $renderizzato );
         
-        // 6) Rimuovi spazi multipli e newline eccessivi
-        $testo = preg_replace('/\s+/', ' ', $testo);
+        // FASE 6: Pulizia finale spazi e caratteri speciali
+        $testo = preg_replace('/\s+/', ' ', $testo);           // Spazi multipli → singolo
+        $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo); // Caratteri controllo
         $testo = trim( $testo );
         
-        // Ripristina il post originale
+        // FASE 7: Validazione - Se c'è ancora "sospetto" codice, segnala
+        if ( preg_match('/[a-z_]+\s*=\s*["\']|width_|custom_|_builder_|global_/i', $testo) ) {
+            // Testo sospetto - prova pulizia finale più drastica
+            $testo = preg_replace('/[a-z_]+\s*=\s*["\'][^"\']*["\']?/i', '', $testo);
+            $testo = preg_replace('/\s+/', ' ', trim($testo));
+        }
+        
         wp_reset_postdata();
         $post = $post_originale;
         
-        // Pulisci anche l'estratto
         $estratto = wp_strip_all_tags( $estratto );
         $estratto = preg_replace('/\s+/', ' ', trim($estratto));
         
         $link = get_permalink( $pid );
 
-        // Costruisci il risultato
         $blocchi = [];
         if ( $titolo ) $blocchi[] = "Titolo: " . $titolo;
         if ( $estratto ) $blocchi[] = "Estratto: " . $estratto;
@@ -369,44 +383,46 @@ class Assistente_IA_RAG {
         if ( $link ) $blocchi[] = "Link: " . $link;
 
         $risultato = trim( implode("\n", $blocchi) );
-        
-        // Applica filtro per personalizzazioni (esempio: rimozione di pattern specifici)
         $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
         
         return $risultato;
     }
 
-    /** ------ Testo descrittivo del prodotto WooCommerce (con fix page builder) ------ */
+    /** ------ Testo descrittivo del prodotto WooCommerce (con pulizia migliorata) ------ */
     protected static function costruisci_testo_prodotto( int $product_id ): string {
         if ( ! self::woo_attivo() ) return '';
         $p = wc_get_product( $product_id );
         if ( ! $p ) return '';
 
-        // Setup del post per il rendering corretto
         global $post;
         $post_originale = $post;
         $post = get_post( $product_id );
         setup_postdata( $post );
 
-        $nome   = get_the_title( $product_id );
+        $nome = get_the_title( $product_id );
         
-        // Short description con rendering
+        // Short description con pulizia aggressiva
         $short_raw = $p->get_short_description();
         $short_rendered = do_shortcode( $short_raw );
         $short_rendered = apply_filters( 'the_content', $short_rendered );
+        // Pulizia attributi
+        $short_rendered = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $short_rendered);
         $short_rendered = strip_shortcodes( $short_rendered );
+        $short_rendered = preg_replace('/\[[^\]]*\]/i', ' ', $short_rendered);
         $short = wp_strip_all_tags( $short_rendered );
         $short = preg_replace('/\s+/', ' ', trim($short));
         
-        // Description con rendering
+        // Description con pulizia aggressiva
         $desc_raw = $p->get_description();
         $desc_rendered = do_shortcode( $desc_raw );
         $desc_rendered = apply_filters( 'the_content', $desc_rendered );
+        // Pulizia attributi
+        $desc_rendered = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $desc_rendered);
         $desc_rendered = strip_shortcodes( $desc_rendered );
+        $desc_rendered = preg_replace('/\[[^\]]*\]/i', ' ', $desc_rendered);
         $desc = wp_strip_all_tags( $desc_rendered );
         $desc = preg_replace('/\s+/', ' ', trim($desc));
         
-        // Ripristina
         wp_reset_postdata();
         $post = $post_originale;
         
@@ -427,8 +443,6 @@ class Assistente_IA_RAG {
         if($link)  $righe[] = "Link: {$link}";
 
         $risultato = trim( implode("\n", array_filter($righe)) );
-        
-        // Applica filtro per personalizzazioni
         $risultato = apply_filters( 'assia_rag_testo_prodotto', $risultato, $product_id );
         
         return $risultato;
