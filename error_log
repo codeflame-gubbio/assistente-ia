@@ -1,9 +1,0 @@
-[01-Oct-2025 19:33:53 UTC] PHP Warning:  require_once(/home/nrylsfra/public_html/wp-content/plugins/assistente-ia-conversazioni/includes/class-assistente-ia-rag-diagnostica.php): Failed to open stream: No such file or directory in /home/nrylsfra/public_html/wp-content/plugins/assistente-ia-conversazioni/assistente-ia-conversazioni.php on line 28
-[01-Oct-2025 19:33:53 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '/home/nrylsfra/public_html/wp-content/plugins/assistente-ia-conversazioni/includes/class-assistente-ia-rag-diagnostica.php' (include_path='.:/opt/cpanel/ea-php83/root/usr/share/pear') in /home/nrylsfra/public_html/wp-content/plugins/assistente-ia-conversazioni/assistente-ia-conversazioni.php:28
-Stack trace:
-#0 /home/nrylsfra/public_html/wp-settings.php(545): include_once()
-#1 /home/nrylsfra/public_html/wp-config.php(100): require_once('/home/nrylsfra/...')
-#2 /home/nrylsfra/public_html/wp-load.php(50): require_once('/home/nrylsfra/...')
-#3 /home/nrylsfra/public_html/wp-admin/admin.php(35): require_once('/home/nrylsfra/...')
-#4 {main}
-  thrown in /home/nrylsfra/public_html/wp-content/plugins/assistente-ia-conversazioni/assistente-ia-conversazioni.php on line 28

@@ -71,26 +71,33 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
     }
     // --- /Context Smart ---
 
-    $b=[];
-    if ( !empty($contesto_brief) ) { $b[] = "Contesto specifico della pagina
-".$contesto_brief; }
-    if ( !empty($contesto_wc) ) { $b[] = "Contesto WooCommerce
-".$contesto_wc; }
-if($obiettivo)$b[]="[Obiettivo]\n".Assistente_IA_Utilita::pulisci_testo($obiettivo);
-    if($avviso)$b[]="[Avviso]\n".Assistente_IA_Utilita::pulisci_testo($avviso);
-    if($riassunto)$b[]="[Riassunto conversazione]\n".$riassunto;
-    if($ultimi)$b[]="[Ultimi turni]\n".$ultimi;
-    if($estratti)$b[]="[Contesto pertinente]\n".$estratti;
-
-    // Blocco anti-disclaimer e stile
-    $b[]="[Stile e Regole]\n".
-         "1) Usa il [Contesto pertinente] come fonte primaria.\n".
-         "2) Evita frasi come «non ho accesso al sito»: se manca qualcosa, chiedi 1 chiarimento.\n".
-         "3) Tono concreto e sintetico; cita titoli/link se presenti nel contesto.\n".
-         "4) Non inventare dati non presenti.";
-
-    $b[]="[Domanda]\n".Assistente_IA_Utilita::pulisci_testo($domanda);
-    $b[]="[Risposta]";
+   $b[]="[Stile e Regole - LEGGI ATTENTAMENTE]\n".
+     "1) PRIORITÀ ASSOLUTA: Usa ESCLUSIVAMENTE il [Contesto pertinente] come fonte.\n".
+     "   - Ogni chunk nel contesto inizia con [Fonte: Nome]. Quando rispondi, cita la fonte.\n".
+     "   - Esempio: \"Come spiegato nella pagina 'Vetrina PRO', il servizio include...\"\n".
+     "\n".
+     "2) SE LA RISPOSTA È NEL CONTESTO:\n".
+     "   - Rispondi in modo diretto, naturale e completo\n".
+     "   - Cita la fonte principale tra quelle nel contesto\n".
+     "   - Usa un tono conversazionale, non robotico\n".
+     "   - Se ci sono link, includili nella risposta\n".
+     "\n".
+     "3) SE LA RISPOSTA NON È NEL CONTESTO:\n".
+     "   - Dillo chiaramente: \"Non ho informazioni specifiche su [argomento] nella nostra base di conoscenza.\"\n".
+     "   - NON inventare, NON fare supposizioni\n".
+     "   - Suggerisci argomenti correlati presenti nel contesto, se pertinenti\n".
+     "   - Esempio: \"Non trovo info su ActiveCampaign, ma posso aiutarti con Vetrina PRO o i nostri servizi di automazione.\"\n".
+     "\n".
+     "4) EVITA ASSOLUTAMENTE:\n".
+     "   - Frasi come «non ho accesso al sito» (SEI il sito!)\n".
+     "   - Disclaimer generici («come assistente IA...»)\n".
+     "   - Inventare dati, prezzi o caratteristiche non presenti\n".
+     "\n".
+     "5) STILE:\n".
+     "   - Italiano naturale e professionale\n".
+     "   - Risposte sintetiche ma complete\n".
+     "   - Usa elenchi puntati per informazioni multiple\n".
+     "   - Mantieni un tono amichevole ma competente";
     return trim(implode("\n\n",$b));
 }
 

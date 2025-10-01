@@ -11,60 +11,145 @@ class Assistente_IA_RAG {
 
     /** Recupera estratti pertinenti dal DB con similarità coseno (Top-K) + fallback keyword */
     public static function recupera_estratti_rag( string $domanda ): string {
-        $k = (int) get_option('assia_embeddings_top_k', 3);
-        
-        if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
-            return self::schede_to_contesto( $schede );
-        }
-
-        $sigla = get_option('assia_modello_embedding','text-embedding-005');
-
-        $emb = Assistente_IA_Modello_Vertex::calcola_embedding(
-            Assistente_IA_Utilita::pulisci_testo($domanda),
-            [ 'id_chat' => null, 'hash_sessione' => null ]
-        );
-        if ( empty($emb['vettore']) ) {
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
-            return self::schede_to_contesto( $schede );
-        }
-        $vq = $emb['vettore'];
-
-        global $wpdb; $pref = $wpdb->prefix;
-        $righe = $wpdb->get_results( $wpdb->prepare(
-            "SELECT testo_chunk, embedding FROM {$pref}assistente_ia_embeddings WHERE modello=%s",
-            $sigla
-        ), ARRAY_A );
-
-        $punteggi = [];
-        if ( ! empty($righe) ){
-            foreach( $righe as $idx => $r ){
-                $vec = json_decode( $r['embedding'], true );
-                if ( ! is_array($vec) ) continue;
-                $score = self::coseno($vq, $vec);
-                $punteggi[] = [ 'i'=>$idx, 'score'=>$score, 'testo'=>$r['testo_chunk'] ];
-            }
-            usort( $punteggi, function($a,$b){ return $b['score'] <=> $a['score']; });
-            $punteggi = array_slice( $punteggi, 0, max(1,$k) );
-        }
-
-        $estratti = [];
-        foreach( $punteggi as $p ){
-            $estratti[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($p['testo']), 1200 );
-        }
-
-        $parole = preg_split('/\s+/', trim($domanda));
-        $short  = ( is_array($parole) && count($parole) <= 3 );
-        $best   = isset($punteggi[0]['score']) ? (float)$punteggi[0]['score'] : 0.0;
-
-        if ( empty($estratti) || $short || $best < 0.20 ){
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
-            $estratti_fb = self::schede_to_array( $schede );
-            $estratti    = array_values( array_filter( array_unique( array_merge($estratti_fb, $estratti) ) ) );
-        }
-
-        return implode("\n---\n", $estratti);
+    $k = (int) get_option('assia_embeddings_top_k', 3);
+    
+    // Se embeddings disattivati → fallback keyword
+    if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
+        $schede = self::fallback_keyword( $domanda, max(1,$k) );
+        return self::schede_to_contesto( $schede );
     }
+
+    $sigla = get_option('assia_modello_embedding','text-embedding-005');
+
+    // Calcola embedding della domanda
+    $emb = Assistente_IA_Modello_Vertex::calcola_embedding(
+        Assistente_IA_Utilita::pulisci_testo($domanda),
+        [ 'id_chat' => null, 'hash_sessione' => null ]
+    );
+    
+    if ( empty($emb['vettore']) ) {
+        $schede = self::fallback_keyword( $domanda, max(1,$k) );
+        return self::schede_to_contesto( $schede );
+    }
+    
+    $vq = $emb['vettore'];
+
+    // Recupera tutti gli embeddings dal DB
+    global $wpdb; 
+    $pref = $wpdb->prefix;
+    $righe = $wpdb->get_results( $wpdb->prepare(
+        "SELECT id_riferimento, fonte, testo_chunk, embedding 
+         FROM {$pref}assistente_ia_embeddings 
+         WHERE modello=%s",
+        $sigla
+    ), ARRAY_A );
+
+    $punteggi = [];
+    
+    if ( ! empty($righe) ){
+        foreach( $righe as $idx => $r ){
+            $vec = json_decode( $r['embedding'], true );
+            if ( ! is_array($vec) ) continue;
+            
+            $score = self::coseno($vq, $vec);
+            
+            $punteggi[] = [ 
+                'i' => $idx, 
+                'score' => $score, 
+                'testo' => $r['testo_chunk'],
+                'id_riferimento' => $r['id_riferimento'],
+                'fonte' => $r['fonte']
+            ];
+        }
+        
+        // Ordina per score decrescente
+        usort( $punteggi, function($a,$b){ 
+            return $b['score'] <=> $a['score']; 
+        });
+    }
+    
+    // ✅ NOVITÀ 1: THRESHOLD MINIMO 0.30
+    // Filtra chunk con score troppo basso (non pertinenti)
+    $threshold = 0.30;
+    $punteggi_filtrati = array_filter($punteggi, function($p) use ($threshold) {
+        return $p['score'] >= $threshold;
+    });
+    
+    // Prendi top-K tra quelli filtrati
+    $punteggi_filtrati = array_slice( $punteggi_filtrati, 0, max(1,$k) );
+    
+    // ✅ NOVITÀ 2: DEDUPLICA CHUNK IDENTICI
+    $estratti = [];
+    $seen_hashes = [];
+    
+    foreach( $punteggi_filtrati as $p ){
+        $testo_pulito = Assistente_IA_Utilita::pulisci_testo($p['testo']);
+        $hash = md5($testo_pulito);
+        
+        // Salta se già visto
+        if ( isset($seen_hashes[$hash]) ) {
+            continue;
+        }
+        $seen_hashes[$hash] = true;
+        
+        // ✅ NOVITÀ 3: AGGIUNGI HEADER CON FONTE
+        $fonte_header = self::get_chunk_header($p['fonte'], $p['id_riferimento']);
+        
+        $chunk_formattato = $fonte_header . "\n" . 
+                           Assistente_IA_Utilita::tronca($testo_pulito, 1200);
+        
+        $estratti[] = $chunk_formattato;
+    }
+
+    $best_score = isset($punteggi[0]['score']) ? (float)$punteggi[0]['score'] : 0.0;
+
+    // ✅ NOVITÀ 4: FALLBACK SOLO SE NECESSARIO (score < 0.30)
+    // Query corte NON forzano più il fallback se lo score è buono
+    if ( empty($estratti) || $best_score < 0.30 ){
+        $schede = self::fallback_keyword( $domanda, max(1,$k) );
+        $estratti_fb = self::schede_to_array( $schede );
+        
+        // Deduplica anche qui
+        $estratti_combined = array_values( 
+            array_filter( 
+                array_unique( 
+                    array_merge($estratti_fb, $estratti) 
+                ) 
+            ) 
+        );
+        
+        return implode("\n---\n", $estratti_combined);
+    }
+
+    return implode("\n---\n", $estratti);
+}
+
+/**
+ * ✅ NUOVA FUNZIONE: Genera header identificativo per il chunk
+ * 
+ * Input: fonte ('post' o 'prodotto'), id_riferimento (ID post/prodotto)
+ * Output: "[Fonte: Titolo Post/Prodotto]"
+ */
+protected static function get_chunk_header( string $fonte, int $id_riferimento ): string {
+    if ( $fonte === 'prodotto' && function_exists('wc_get_product') ) {
+        $product = wc_get_product( $id_riferimento );
+        if ( $product ) {
+            $titolo = $product->get_name();
+            return "[Fonte: Prodotto '{$titolo}']";
+        }
+    }
+    
+    // Post o Page
+    $post = get_post( $id_riferimento );
+    if ( $post ) {
+        $titolo = get_the_title( $id_riferimento );
+        $tipo = get_post_type( $id_riferimento );
+        $tipo_label = $tipo === 'page' ? 'Pagina' : 'Articolo';
+        return "[Fonte: {$tipo_label} '{$titolo}']";
+    }
+    
+    return "[Fonte: Contenuto ID {$id_riferimento}]";
+}
 
     /** 
      * Prepara un job di indicizzazione: 
