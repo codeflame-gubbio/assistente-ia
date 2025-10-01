@@ -70,7 +70,7 @@ class Assistente_IA_Installazione {
             'assia_localita' => 'us-central1',
             'assia_modello' => 'gemini-2.0-flash-001',
             'assia_modello_embedding' => 'text-embedding-005',
-            'assia_credenziali_base64' => '', // JSON in chiaro O Base64 (auto-rilevato)
+            'assia_credenziali_base64' => '',
             'assia_obiettivo' => 'Sei un assistente utile e preciso.',
             'assia_avviso' => 'Le risposte sono fornite a scopo informativo.',
             'assia_temperature' => 0.2,
@@ -86,6 +86,7 @@ class Assistente_IA_Installazione {
             'assia_attiva_google_search' => 'no',
             'assia_attiva_embeddings' => 'si',
             'assia_embeddings_top_k' => 3,
+            'assia_embeddings_threshold' => '0.30',
             'assia_embeddings_solo_migliori' => 'si',
             'assia_turni_modello' => 8,
             'assia_messaggi_ui' => 30,
@@ -94,9 +95,8 @@ class Assistente_IA_Installazione {
             'assia_rate_limite_finestra_sec' => 60,
             'assia_bottone_testo' => 'Chatta con noi',
             'assia_bottone_posizione' => 'bottom-right',
-            // **NUOVE**
-            'assia_registro_modello_attivo' => 'no', // on/off diagnostica modello
-            'assia_ruolo_sistema' => '',             // systemInstruction personalizzabile
+            'assia_registro_modello_attivo' => 'no',
+            'assia_ruolo_sistema' => '',
         ];
         foreach($predef as $k=>$v){ if(get_option($k,null)===null){ add_option($k,$v); } }
     }

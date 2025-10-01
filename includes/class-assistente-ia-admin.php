@@ -41,14 +41,7 @@ public function aggiungi_menu(){
         'assia', 'Archivio conversazioni', 'Archivio conversazioni', 'manage_options', 'assia-archivio',
         [ $this, 'pagina_archivio' ]
     );
-
-    // Aggiungi il sottomenu RAG qui SOLO se la classe non lo aggiunge da sola altrove
 }
-
-
-
-
-
 
     public function registra_impostazioni(){
         $opts = array(
@@ -67,6 +60,7 @@ public function aggiungi_menu(){
             'assia_attiva_google_search',
             'assia_attiva_embeddings',
             'assia_embeddings_top_k',
+            'assia_embeddings_threshold',
             'assia_embeddings_solo_migliori',
             'assia_turni_modello',
             'assia_messaggi_ui',
@@ -127,7 +121,7 @@ public function carica_script_admin( $hook ){
             <tr><th>Avviso</th><td><textarea name="assia_avviso" rows="3" class="large-text"><?php echo esc_textarea(get_option('assia_avviso')); ?></textarea></td></tr>
             <tr><th>Ruolo di sistema (anti-disclaimer)</th>
                 <td><textarea name="assia_ruolo_sistema" rows="5" class="large-text" placeholder="Istruzioni persistenti per lo stile delle risposte"><?php echo esc_textarea(get_option('assia_ruolo_sistema','')); ?></textarea>
-                <p class="description">Se vuoto, viene usato un testo predefinito che obbliga all’uso del Contesto e vieta disclaimer generici.</p></td>
+                <p class="description">Se vuoto, viene usato un testo predefinito che obbliga all'uso del Contesto e vieta disclaimer generici.</p></td>
             </tr>
         </table>
 
@@ -148,6 +142,24 @@ public function carica_script_admin( $hook ){
                 } ?>
             </td></tr>
             <tr><th>Google Search</th><td><select name="assia_attiva_google_search"><option value="no" <?php selected(get_option('assia_attiva_google_search'),'no');?>>No</option><option value="si" <?php selected(get_option('assia_attiva_google_search'),'si');?>>Sì</option></select></td></tr>
+        </table>
+
+        <h2>RAG / Embeddings</h2>
+        <table class="form-table">
+            <tr><th>Attiva embeddings</th><td>
+                <select name="assia_attiva_embeddings">
+                    <option value="si" <?php selected(get_option('assia_attiva_embeddings','si'),'si');?>>Sì</option>
+                    <option value="no" <?php selected(get_option('assia_attiva_embeddings','si'),'no');?>>No</option>
+                </select>
+            </td></tr>
+            <tr><th>Top-K chunks</th><td>
+                <input type="number" name="assia_embeddings_top_k" value="<?php echo esc_attr(get_option('assia_embeddings_top_k',3)); ?>" min="1" max="20">
+                <p class="description">Numero massimo di chunk da recuperare per query</p>
+            </td></tr>
+            <tr><th>Threshold similarità minima</th><td>
+                <input type="number" step="0.01" name="assia_embeddings_threshold" value="<?php echo esc_attr(get_option('assia_embeddings_threshold','0.30')); ?>" min="0" max="1">
+                <p class="description">Score minimo per considerare un chunk rilevante (0.30 consigliato). Valori più alti = più selettivo.</p>
+            </td></tr>
         </table>
 
         <h2>Widget chat</h2>
@@ -192,7 +204,7 @@ public function carica_script_admin( $hook ){
                     <option value="no" <?php selected(get_option('assia_registro_modello_attivo'),'no');?>>No</option>
                     <option value="si" <?php selected(get_option('assia_registro_modello_attivo'),'si');?>>Sì</option>
                 </select>
-                <p class="description">Se attivo, ogni richiesta/risposta al modello viene registrata in una tabella dedicata. Consulta “Diagnostica Modello”.</p>
+                <p class="description">Se attivo, ogni richiesta/risposta al modello viene registrata in una tabella dedicata. Consulta "Diagnostica Modello".</p>
             </td></tr>
         </table>
 
@@ -200,7 +212,7 @@ public function carica_script_admin( $hook ){
 
         <hr><h2>Indice Embeddings (modalità sincrona – legacy)</h2>
         <form method="post"><?php wp_nonce_field('assia_rigenera_embeddings'); ?>
-            <p>Rigenera l’indice dagli articoli/pagine pubblicati (operazione sincrona).</p>
+            <p>Rigenera l'indice dagli articoli/pagine pubblicati (operazione sincrona).</p>
             <p><button class="button" name="rigenera_embeddings" value="1">Rigenera ora</button></p>
         </form>
         </div><?php
@@ -395,7 +407,7 @@ global $wpdb; $pref=$wpdb->prefix;
                     <?php endforeach; ?>
                     </tbody>
                 </table>
-                <p><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=assia-archivio')); ?>">Torna all’archivio</a></p>
+                <p><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=assia-archivio')); ?>">Torna all'archivio</a></p>
             </div>
             <?php
             return;
@@ -585,6 +597,3 @@ global $wpdb; $pref=$wpdb->prefix;
         }
     }
 }
-
-
-    
