@@ -7,14 +7,13 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 class Assistente_IA_Prompt {
 
 public static function costruisci_prompt(int $id_chat, string $domanda, int $post_id = 0): string {
-    $obiettivo=get_option('assia_obiettivo','');
-    $avviso=get_option('assia_avviso','');
+    $obiettivo = get_option('assia_obiettivo','');
+    $avviso = get_option('assia_avviso','');
 
-    list($riassunto,$ultimi)=self::recupera_contesto_conversazione($id_chat);
-    $estratti=Assistente_IA_RAG::recupera_estratti_rag($domanda);
+    list($riassunto, $ultimi) = self::recupera_contesto_conversazione($id_chat);
+    $estratti = Assistente_IA_RAG::recupera_estratti_rag($domanda);
 
-    // --- v5.3.4: Context Smart ---
-    // Contesto della pagina corrente (titolo/URL/riassunto), se post pubblico
+    // --- Context Smart ---
     $contesto_pagina = '';
     if ( $post_id > 0 ) {
         $p = get_post($post_id);
@@ -26,7 +25,7 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         }
     }
 
-    // Contesto WooCommerce (solo se abilitato e su product pubblicato)
+    // Contesto WooCommerce
     $contesto_wc = '';
     if ( 'si' === get_option('assia_context_wc','si') && $post_id > 0 && function_exists('wc_get_product') ) {
         $post_type = get_post_type( $post_id );
@@ -37,7 +36,6 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
                 $tit = get_the_title($post_id);
                 $url = get_permalink($post_id);
                 $sku = $product->get_sku() ?: '-';
-                // Prezzo con gestione variabili (range)
                 $prezzo = '';
                 if ( $product->is_type('variable') ) {
                     $min = $product->get_variation_price('min', true);
@@ -47,7 +45,6 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
                 } else {
                     $prezzo = wc_price( $product->get_price() );
                 }
-                // Categorie
                 $terms = get_the_terms($post_id, 'product_cat'); $cats=[];
                 if ( is_array($terms) ) { foreach($terms as $t){ $cats[] = $t->name; } }
                 $cats_str = $cats ? implode(', ', $cats) : '-';
@@ -56,7 +53,7 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         }
     }
 
-    // Contesto specifico (mini-brief) per la pagina/post, se abilitato
+    // Contesto specifico (mini-brief)
     $contesto_brief = '';
     if ( 'si' === get_option('assia_context_brief_enable','si') && $post_id > 0 ) {
         $p = get_post($post_id);
@@ -69,38 +66,86 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
             }
         }
     }
-    // --- /Context Smart ---
 
-   $b[]="[Stile e Regole - LEGGI ATTENTAMENTE]\n".
-     "1) PRIORITÀ ASSOLUTA: Usa ESCLUSIVAMENTE il [Contesto pertinente] come fonte.\n".
-     "   - Ogni chunk nel contesto inizia con [Fonte: Nome]. Quando rispondi, cita la fonte.\n".
-     "   - Esempio: \"Come spiegato nella pagina 'Vetrina PRO', il servizio include...\"\n".
-     "\n".
-     "2) SE LA RISPOSTA È NEL CONTESTO:\n".
-     "   - Rispondi in modo diretto, naturale e completo\n".
-     "   - Cita la fonte principale tra quelle nel contesto\n".
-     "   - Usa un tono conversazionale, non robotico\n".
-     "   - Se ci sono link, includili nella risposta\n".
-     "\n".
-     "3) SE LA RISPOSTA NON È NEL CONTESTO:\n".
-     "   - Dillo chiaramente: \"Non ho informazioni specifiche su [argomento] nella nostra base di conoscenza.\"\n".
-     "   - NON inventare, NON fare supposizioni\n".
-     "   - Suggerisci argomenti correlati presenti nel contesto, se pertinenti\n".
-     "   - Esempio: \"Non trovo info su ActiveCampaign, ma posso aiutarti con Vetrina PRO o i nostri servizi di automazione.\"\n".
-     "\n".
-     "4) EVITA ASSOLUTAMENTE:\n".
-     "   - Frasi come «non ho accesso al sito» (SEI il sito!)\n".
-     "   - Disclaimer generici («come assistente IA...»)\n".
-     "   - Inventare dati, prezzi o caratteristiche non presenti\n".
-     "\n".
-     "5) STILE:\n".
-     "   - Italiano naturale e professionale\n".
-     "   - Risposte sintetiche ma complete\n".
-     "   - Usa elenchi puntati per informazioni multiple\n".
-     "   - Mantieni un tono amichevole ma competente";
-    return trim(implode("\n\n",$b));
+    // ✅ COSTRUZIONE PROMPT COMPLETO
+    $blocchi = [];
+
+    // 1. Obiettivo (se presente)
+    if ( $obiettivo ) {
+        $blocchi[] = "[Obiettivo]\n" . trim($obiettivo);
+    }
+
+    // 2. Regole di stile (SEMPRE)
+    $blocchi[] = "[Stile e Regole - LEGGI ATTENTAMENTE]\n".
+        "1) PRIORITÀ ASSOLUTA: Usa ESCLUSIVAMENTE il [Contesto pertinente] come fonte.\n".
+        "   - Ogni chunk nel contesto inizia con [Fonte: Nome]. Quando rispondi, cita la fonte.\n".
+        "   - Esempio: \"Come spiegato nella pagina 'Vetrina PRO', il servizio include...\"\n".
+        "\n".
+        "2) SE LA RISPOSTA È NEL CONTESTO:\n".
+        "   - Rispondi in modo diretto, naturale e completo\n".
+        "   - Cita la fonte principale tra quelle nel contesto\n".
+        "   - Usa un tono conversazionale, non robotico\n".
+        "   - Se ci sono link, includili nella risposta\n".
+        "\n".
+        "3) SE LA RISPOSTA NON È NEL CONTESTO:\n".
+        "   - Dillo chiaramente: \"Non ho informazioni specifiche su [argomento] nella nostra base di conoscenza.\"\n".
+        "   - NON inventare, NON fare supposizioni\n".
+        "   - Suggerisci argomenti correlati presenti nel contesto, se pertinenti\n".
+        "   - Esempio: \"Non trovo info su ActiveCampaign, ma posso aiutarti con Vetrina PRO o i nostri servizi di automazione.\"\n".
+        "\n".
+        "4) EVITA ASSOLUTAMENTE:\n".
+        "   - Frasi come «non ho accesso al sito» (SEI il sito!)\n".
+        "   - Disclaimer generici («come assistente IA...»)\n".
+        "   - Inventare dati, prezzi o caratteristiche non presenti\n".
+        "\n".
+        "5) STILE:\n".
+        "   - Italiano naturale e professionale\n".
+        "   - Risposte sintetiche ma complete\n".
+        "   - Usa elenchi puntati per informazioni multiple\n".
+        "   - Mantieni un tono amichevole ma competente";
+
+    // 3. Contesto pertinente (RAG) - IL PIÙ IMPORTANTE!
+    if ( $estratti ) {
+        $blocchi[] = "[Contesto pertinente]\n" . trim($estratti);
+    } else {
+        $blocchi[] = "[Contesto pertinente]\nNessun contenuto trovato nella base di conoscenza per questa domanda.";
+    }
+
+    // 4. Contesto pagina corrente (se presente)
+    if ( $contesto_pagina ) {
+        $blocchi[] = "[Pagina corrente]\n" . trim($contesto_pagina);
+    }
+
+    // 5. Contesto WooCommerce (se presente)
+    if ( $contesto_wc ) {
+        $blocchi[] = "[Dettagli prodotto]\n" . trim($contesto_wc);
+    }
+
+    // 6. Mini-brief specifico (se presente)
+    if ( $contesto_brief ) {
+        $blocchi[] = "[Contesto editoriale]\n" . trim($contesto_brief);
+    }
+
+    // 7. Riassunto conversazione (se presente)
+    if ( $riassunto ) {
+        $blocchi[] = "[Riassunto conversazione]\n" . trim($riassunto);
+    }
+
+    // 8. Ultimi turni conversazione (se presenti)
+    if ( $ultimi ) {
+        $blocchi[] = "[Conversazione recente]\n" . trim($ultimi);
+    }
+
+    // 9. Avviso (se presente)
+    if ( $avviso ) {
+        $blocchi[] = "[Avviso]\n" . trim($avviso);
+    }
+
+    // 10. LA DOMANDA DELL'UTENTE (FONDAMENTALE!)
+    $blocchi[] = "[Domanda utente]\n" . trim($domanda);
+
+    return implode("\n\n", $blocchi);
 }
-
 
     /** Recupera riassunto compresso e ultimi N turni della chat */
     protected static function recupera_contesto_conversazione(int $id_chat): array {
