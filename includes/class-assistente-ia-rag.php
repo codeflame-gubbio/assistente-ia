@@ -436,95 +436,163 @@ class Assistente_IA_RAG {
         return $pulite;
     }
 
-    /** 
-     * ========================================
-     * ESTRAZIONE TESTO DA POST/PAGINA
-     * VERSIONE MIGLIORATA: Pulizia aggressiva
-     * ======================================== 
-     */
-    protected static function testo_da_post( int $pid ): string {
-        $titolo   = get_the_title( $pid );
-        $estratto = get_the_excerpt( $pid );
-        
-        global $post;
-        $post_originale = $post;
-        $post = get_post( $pid );
-        
-        if ( ! $post ) {
-            return '';
-        }
-        
-        setup_postdata( $post );
-        
-        $contenuto_raw = $post->post_content;
-        
-        // FASE 1: Espandi shortcode e applica filtri content
-        $contenuto_espanso = do_shortcode( $contenuto_raw );
-        $renderizzato = apply_filters( 'the_content', $contenuto_espanso );
-        
-        // FASE 2: Pulizia AGGRESSIVA degli attributi shortcode residui
-        $renderizzato = preg_replace('/\s+[a-zA-Z_\-]+\s*=\s*["\'][^"\']*["\']/i', '', $renderizzato);
-        
-        // Rimuovi pattern page builder comuni
-        $builder_patterns = [
-            '/\[et_pb_[^\]]*\]/i',
-            '/\[\/et_pb_[^\]]*\]/i',
-            '/data-[a-zA-Z\-]+=["\'"][^"\']*["\']/i',
-            '/_builder_version=["\'][^"\']*["\']/i',
-            '/custom_[a-zA-Z_]+=["\'][^"\']*["\']/i',
-            '/global_colors_info=["\'][^"\']*["\']/i',
-            '/\[vc_[^\]]*\]/i',
-            '/\[\/vc_[^\]]*\]/i',
-            '/\[elementor-[^\]]*\]/i',
-        ];
-        
-        foreach( $builder_patterns as $pattern ){
-            $renderizzato = preg_replace( $pattern, ' ', $renderizzato );
-        }
-        
-        // FASE 3: Rimuovi shortcode residui
-        $renderizzato = strip_shortcodes( $renderizzato );
-        $renderizzato = preg_replace('/\[[^\]]*\]/i', ' ', $renderizzato);
-        
-        // FASE 4: Pulisci script, style, commenti
-        $renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $renderizzato);
-        $renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $renderizzato);
-        $renderizzato = preg_replace('/<!--(.*)-->/Uis', '', $renderizzato);
-        
-        // FASE 5: Estrai solo testo
-        $testo = wp_strip_all_tags( $renderizzato );
-        
-        // FASE 6: Pulizia finale spazi
-        $testo = preg_replace('/\s+/', ' ', $testo);
-        $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo);
-        $testo = trim( $testo );
-        
-        // FASE 7: Validazione codice sospetto
-        if ( preg_match('/[a-z_]+\s*=\s*["\']|width_|custom_|_builder_|global_/i', $testo) ) {
-            $testo = preg_replace('/[a-z_]+\s*=\s*["\'][^"\']*["\']?/i', '', $testo);
-            $testo = preg_replace('/\s+/', ' ', trim($testo));
-        }
-        
-        wp_reset_postdata();
-        $post = $post_originale;
-        
-        $estratto = wp_strip_all_tags( $estratto );
-        $estratto = preg_replace('/\s+/', ' ', trim($estratto));
-        
-        $link = get_permalink( $pid );
-
-        $blocchi = [];
-        if ( $titolo ) $blocchi[] = "Titolo: " . $titolo;
-        if ( $estratto ) $blocchi[] = "Estratto: " . $estratto;
-        if ( $testo ) $blocchi[] = "Contenuto: " . $testo;
-        if ( $link ) $blocchi[] = "Link: " . $link;
-
-        $risultato = trim( implode("\n", $blocchi) );
-        $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
-        
-        return $risultato;
+    /**
+ * ========================================
+ * ESTRAZIONE TESTO DA POST/PAGINA
+ * VERSIONE ULTRA-AGGRESSIVA: Rimuove TUTTO tranne il testo
+ * ======================================== 
+ */
+protected static function testo_da_post( int $pid ): string {
+    $titolo   = get_the_title( $pid );
+    $estratto = get_the_excerpt( $pid );
+    
+    global $post;
+    $post_originale = $post;
+    $post = get_post( $pid );
+    
+    if ( ! $post ) {
+        return '';
     }
+    
+    setup_postdata( $post );
+    
+    $contenuto_raw = $post->post_content;
+    
+    // ============================================
+    // FASE 1: RIMUOVI SHORTCODE BUILDER (PRIMA di espanderli!)
+    // ============================================
+    $builder_shortcodes = [
+        '/\[et_pb_[^\]]*\]/',           // Divi
+        '/\[\/et_pb_[^\]]*\]/',
+        '/\[vc_[^\]]*\]/',              // Visual Composer
+        '/\[\/vc_[^\]]*\]/',
+        '/\[elementor-[^\]]*\]/',       // Elementor
+        '/\[fusion_[^\]]*\]/',          // Avada
+        '/\[\/fusion_[^\]]*\]/',
+    ];
+    
+    foreach( $builder_shortcodes as $pattern ){
+        $contenuto_raw = preg_replace( $pattern, ' ', $contenuto_raw );
+    }
+    
+    // ============================================
+    // FASE 2: RIMUOVI ATTRIBUTI HTML/CSS INLINE (PRIMA di strip_tags!)
+    // ============================================
+    
+    // Rimuovi stili inline completi
+    $contenuto_raw = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $contenuto_raw);
+    $contenuto_raw = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $contenuto_raw);
+    
+    // Rimuovi attributi style="..."
+    $contenuto_raw = preg_replace('/\s+style\s*=\s*["\'][^"\']*["\']/i', '', $contenuto_raw);
+    
+    // Rimuovi attributi data-*
+    $contenuto_raw = preg_replace('/\s+data-[a-zA-Z\-]+\s*=\s*["\'][^"\']*["\']/i', '', $contenuto_raw);
+    
+    // Rimuovi attributi class="..."
+    $contenuto_raw = preg_replace('/\s+class\s*=\s*["\'][^"\']*["\']/i', '', $contenuto_raw);
+    
+    // Rimuovi attributi id="..."
+    $contenuto_raw = preg_replace('/\s+id\s*=\s*["\'][^"\']*["\']/i', '', $contenuto_raw);
+    
+    // ============================================
+    // FASE 3: ESPANDI SHORTCODE RIMASTI (solo quelli WordPress standard)
+    // ============================================
+    $contenuto_espanso = do_shortcode( $contenuto_raw );
+    
+    // ============================================
+    // FASE 4: STRIP HTML TAGS
+    // ============================================
+    $testo = wp_strip_all_tags( $contenuto_espanso );
+    
+    // ============================================
+    // FASE 5: RIMUOVI RESIDUI CSS/CODICE NEL TESTO
+    // ============================================
+    
+    // Rimuovi colori hex (#RRGGBB)
+    $testo = preg_replace('/#[0-9a-fA-F]{3,6}\b/', '', $testo);
+    
+    // Rimuovi rgba(...)
+    $testo = preg_replace('/rgba?\([^)]+\)/', '', $testo);
+    
+    // Rimuovi pattern tipo "background-color:", "font-size:", ecc
+    $testo = preg_replace('/[a-z\-]+\s*:\s*[^;]+;?/i', '', $testo);
+    
+    // Rimuovi pattern tipo "custom_padding=" "width_" ecc
+    $testo = preg_replace('/[a-z_\-]+\s*=\s*["\'][^"\']*["\']?/i', '', $testo);
+    
+    // Rimuovi underscore multipli (es: "_builder_version")
+    $testo = preg_replace('/_[a-z_]+/i', '', $testo);
+    
+    // Rimuovi unità di misura CSS (px, em, rem, %, vh, vw)
+    $testo = preg_replace('/\d+(?:px|em|rem|%|vh|vw)\b/i', '', $testo);
+    
+    // ============================================
+    // FASE 6: NORMALIZZA SPAZI E CARATTERI
+    // ============================================
+    $testo = html_entity_decode($testo, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $testo = preg_replace('/\s+/', ' ', $testo);
+    $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo);
+    $testo = trim( $testo );
+    
+    // ============================================
+    // FASE 7: VALIDAZIONE FINALE (scarta se contiene troppo codice)
+    // ============================================
+    
+    // Se contiene ancora pattern sospetti, ri-pulisci
+    $pattern_sospetti = [
+        '/#[0-9a-fA-F]{6}/',        // Colori hex
+        '/rgba?\(/',                 // rgba/rgb
+        '/[a-z_\-]+\s*=\s*["\']/',  // Attributi tipo key="value"
+        '/_builder_/',               // Pattern Divi
+        '/custom_/',                 // Pattern custom
+        '/global_colors/',           // Pattern Divi
+    ];
+    
+    $num_pattern_trovati = 0;
+    foreach( $pattern_sospetti as $pattern ) {
+        if ( preg_match($pattern, $testo) ) {
+            $num_pattern_trovati++;
+        }
+    }
+    
+    // Se ci sono più di 3 pattern sospetti, probabilmente è ancora codice
+    if ( $num_pattern_trovati > 3 ) {
+        error_log("ASSIA RAG: Post ID {$pid} contiene ancora codice dopo pulizia. Pattern trovati: {$num_pattern_trovati}");
+        // Ultima pulizia drastica: rimuovi qualsiasi cosa che sembri codice
+        $testo = preg_replace('/[a-z_\-]+\s*[:=]\s*[^,\.!\?]+/i', '', $testo);
+        $testo = preg_replace('/\s+/', ' ', trim($testo));
+    }
+    
+    wp_reset_postdata();
+    $post = $post_originale;
+    
+    // ============================================
+    // FASE 8: ASSEMBLA RISULTATO FINALE
+    // ============================================
+    
+    $estratto = wp_strip_all_tags( $estratto );
+    $estratto = preg_replace('/\s+/', ' ', trim($estratto));
+    
+    $link = get_permalink( $pid );
 
+    $blocchi = [];
+    if ( $titolo ) $blocchi[] = "Titolo: " . $titolo;
+    if ( $estratto ) $blocchi[] = "Estratto: " . $estratto;
+    if ( $testo && strlen($testo) > 50 ) $blocchi[] = "Contenuto: " . $testo; // Solo se > 50 caratteri
+    if ( $link ) $blocchi[] = "Link: " . $link;
+
+    $risultato = trim( implode("\n", $blocchi) );
+    
+    // Log per debug (solo se sembra ancora contenere codice)
+    if ( strlen($risultato) < 100 || $num_pattern_trovati > 0 ) {
+        error_log("ASSIA RAG WARNING: Post ID {$pid} ha testo molto breve o sospetto: " . substr($risultato, 0, 200));
+    }
+    
+    $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
+    
+    return $risultato;
+}
     /** ------ Testo descrittivo del prodotto WooCommerce (con pulizia migliorata) ------ */
     protected static function costruisci_testo_prodotto( int $product_id ): string {
         if ( ! self::woo_attivo() ) return '';
