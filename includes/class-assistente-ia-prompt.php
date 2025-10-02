@@ -3,6 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Costruzione del prompt contestuale (obiettivo, avviso, riassunto chat, ultimi turni, RAG).
+ * VERSIONE CON CONTESTO PAGINA AUMENTATO A 500 PAROLE
  */
 class Assistente_IA_Prompt {
 
@@ -20,7 +21,8 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         if ( $p && $p->post_status === 'publish' && empty($p->post_password) ) {
             $tit = get_the_title($p);
             $url = get_permalink($p);
-            $estr = wp_trim_words( wp_strip_all_tags( get_the_excerpt($p) ?: $p->post_content ), 40 );
+            // ✅ AUMENTATO DA 40 A 500 PAROLE
+            $estr = wp_trim_words( wp_strip_all_tags( get_the_excerpt($p) ?: $p->post_content ), 500 );
             $contesto_pagina = "Titolo: {$tit}\nURL: {$url}\nRiassunto: {$estr}";
         }
     }
@@ -111,7 +113,7 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         $blocchi[] = "[Contesto pertinente]\nNessun contenuto trovato nella base di conoscenza per questa domanda.";
     }
 
-    // 4. Contesto pagina corrente (se presente)
+    // 4. Contesto pagina corrente (se presente) - ORA CON 500 PAROLE!
     if ( $contesto_pagina ) {
         $blocchi[] = "[Pagina corrente]\n" . trim($contesto_pagina);
     }

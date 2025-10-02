@@ -2,19 +2,21 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
- * RAG (embeddings) + diagnostica + job di rigenerazione a step con storico.
- * VERSIONE CON SELEZIONE MANUALE CONTENUTI + THRESHOLD CONFIGURABILE
- * - Post/Pagine: solo quelli selezionati dall'admin
- * - Prodotti WooCommerce: sempre inclusi automaticamente
+ * RAG AVANZATO con:
+ * - Sistema snapshot hashato completo (rileva aggiunti/modificati/eliminati)
+ * - Chunking intelligente con overlap di frasi
+ * - Modalità recupero BEST-1 vs TOP-K
  */
 class Assistente_IA_RAG {
 
-    /** Recupera estratti pertinenti dal DB con similarità coseno (Top-K) + fallback keyword */
+    /** 
+     * Recupera estratti pertinenti con modalità BEST-1 o TOP-K
+     */
     public static function recupera_estratti_rag( string $domanda ): string {
+        $mode = get_option('assia_rag_mode', 'top-k');
         $k = (int) get_option('assia_embeddings_top_k', 3);
         $threshold = (float) get_option('assia_embeddings_threshold', 0.30);
         
-        // Se embeddings disattivati → fallback keyword
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             return self::schede_to_contesto( $schede );
@@ -22,7 +24,6 @@ class Assistente_IA_RAG {
 
         $sigla = get_option('assia_modello_embedding','text-embedding-005');
 
-        // Calcola embedding della domanda
         $emb = Assistente_IA_Modello_Vertex::calcola_embedding(
             Assistente_IA_Utilita::pulisci_testo($domanda),
             [ 'id_chat' => null, 'hash_sessione' => null ]
@@ -35,7 +36,6 @@ class Assistente_IA_RAG {
         
         $vq = $emb['vettore'];
 
-        // Recupera tutti gli embeddings dal DB
         global $wpdb; 
         $pref = $wpdb->prefix;
         $righe = $wpdb->get_results( $wpdb->prepare(
@@ -63,13 +63,11 @@ class Assistente_IA_RAG {
                 ];
             }
             
-            // Ordina per score decrescente
             usort( $punteggi, function($a,$b){ 
                 return $b['score'] <=> $a['score']; 
             });
         }
         
-        // ✅ FILTRO CON THRESHOLD CONFIGURABILE + LOGGING
         $totali_prima_filtro = count($punteggi);
         $punteggi_filtrati = array_filter($punteggi, function($p) use ($threshold) {
             return $p['score'] >= $threshold;
@@ -77,10 +75,10 @@ class Assistente_IA_RAG {
         $totali_dopo_filtro = count($punteggi_filtrati);
         $scartati = $totali_prima_filtro - $totali_dopo_filtro;
         
-        // Log per diagnostica (solo se ci sono scartati)
         if ( $scartati > 0 && current_user_can('manage_options') ) {
             error_log(sprintf(
-                'ASSIA RAG: Query "%s" - Scartati %d chunk (score < %.2f). Best score: %.3f',
+                'ASSIA RAG [%s]: Query "%s" - Scartati %d chunk (score < %.2f). Best: %.3f',
+                $mode,
                 substr($domanda, 0, 50),
                 $scartati,
                 $threshold,
@@ -88,10 +86,13 @@ class Assistente_IA_RAG {
             ));
         }
         
-        // Prendi top-K tra quelli filtrati
-        $punteggi_filtrati = array_slice( $punteggi_filtrati, 0, max(1,$k) );
+        // ✅ APPLICA MODALITÀ: BEST-1 vs TOP-K
+        if ( $mode === 'best-1' ) {
+            $punteggi_filtrati = array_slice( $punteggi_filtrati, 0, 1 );
+        } else {
+            $punteggi_filtrati = array_slice( $punteggi_filtrati, 0, max(1,$k) );
+        }
         
-        // ✅ DEDUPLICA CHUNK IDENTICI
         $estratti = [];
         $seen_hashes = [];
         
@@ -99,13 +100,11 @@ class Assistente_IA_RAG {
             $testo_pulito = Assistente_IA_Utilita::pulisci_testo($p['testo']);
             $hash = md5($testo_pulito);
             
-            // Salta se già visto
             if ( isset($seen_hashes[$hash]) ) {
                 continue;
             }
             $seen_hashes[$hash] = true;
             
-            // ✅ AGGIUNGI HEADER CON FONTE
             $fonte_header = self::get_chunk_header($p['fonte'], $p['id_riferimento']);
             
             $chunk_formattato = $fonte_header . "\n" . 
@@ -116,10 +115,10 @@ class Assistente_IA_RAG {
 
         $best_score = isset($punteggi[0]['score']) ? (float)$punteggi[0]['score'] : 0.0;
 
-        // ✅ FALLBACK MIGLIORATO: solo se NESSUN chunk valido trovato
         if ( empty($estratti) ){
             error_log(sprintf(
-                'ASSIA RAG: Nessun chunk sopra threshold %.2f per query "%s" (best: %.3f) - Fallback keyword',
+                'ASSIA RAG [%s]: Nessun chunk sopra threshold %.2f per query "%s" (best: %.3f) - Fallback',
+                $mode,
                 $threshold,
                 substr($domanda, 0, 50),
                 $best_score
@@ -128,7 +127,6 @@ class Assistente_IA_RAG {
             $schede = self::fallback_keyword( $domanda, max(1,$k) );
             $estratti_fb = self::schede_to_array( $schede );
             
-            // Deduplica anche qui
             $estratti_combined = array_values( 
                 array_filter( 
                     array_unique( 
@@ -143,9 +141,6 @@ class Assistente_IA_RAG {
         return implode("\n---\n", $estratti);
     }
 
-    /**
-     * ✅ Genera header identificativo per il chunk
-     */
     protected static function get_chunk_header( string $fonte, int $id_riferimento ): string {
         if ( $fonte === 'prodotto' && function_exists('wc_get_product') ) {
             $product = wc_get_product( $id_riferimento );
@@ -155,7 +150,6 @@ class Assistente_IA_RAG {
             }
         }
         
-        // Post o Page
         $post = get_post( $id_riferimento );
         if ( $post ) {
             $titolo = get_the_title( $id_riferimento );
@@ -168,18 +162,16 @@ class Assistente_IA_RAG {
     }
 
     /** 
-     * Prepara un job di indicizzazione: 
-     * - Post/Pagine SELEZIONATI dall'admin
-     * - Prodotti WooCommerce (se presente) SEMPRE INCLUSI
+     * ✅ PREPARA JOB CON SNAPSHOT HASHATO
      */
     public static function prepara_job_indicizzazione(): array {
-        $voci = [];
+        $auto_regen = get_option('assia_auto_regenerate_hash', 'si') === 'si';
+        
+        $voci_tutte = [];
 
-        // POST E PAGINE: Solo quelli selezionati
         if ( class_exists('Assistente_IA_Content_Selector') ) {
             $selected_ids = Assistente_IA_Content_Selector::get_selected_content_ids();
         } else {
-            // Fallback: se la classe non è disponibile, prendi tutti i post/page pubblicati
             $q = new WP_Query([
                 'post_type' => ['post', 'page'],
                 'post_status' => 'publish',
@@ -189,18 +181,16 @@ class Assistente_IA_RAG {
             $selected_ids = $q->posts ?? [];
         }
 
-        // Valida che gli ID siano effettivamente pubblicati
         foreach( $selected_ids as $pid ){
             $pid = (int)$pid;
             $status = get_post_status($pid);
             $type = get_post_type($pid);
             
             if ( $status === 'publish' && in_array($type, ['post', 'page'], true) ) {
-                $voci[] = [ 'fonte' => 'post', 'id' => $pid ];
+                $voci_tutte[] = [ 'fonte' => 'post', 'id' => $pid ];
             }
         }
 
-        // PRODOTTI WOOCOMMERCE: Sempre inclusi automaticamente
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([
                 'post_type' => ['product'],
@@ -209,29 +199,122 @@ class Assistente_IA_RAG {
                 'fields' => 'ids'
             ]);
             foreach( ($qp->posts ?? []) as $pid ){
-                $voci[] = [ 'fonte' => 'prodotto', 'id' => (int)$pid ];
+                $voci_tutte[] = [ 'fonte' => 'prodotto', 'id' => (int)$pid ];
             }
+        }
+
+        $voci_da_processare = [];
+        
+        if ( $auto_regen ) {
+            $voci_da_processare = self::rileva_modifiche_snapshot( $voci_tutte );
+        } else {
+            $voci_da_processare = $voci_tutte;
         }
 
         $job = [
             'stato' => 'in_attesa',
-            'totale' => count($voci),
+            'totale' => count($voci_da_processare),
             'indice' => 0,
             'creati' => 0,
             'modello' => get_option('assia_modello_embedding','text-embedding-005'),
-            'voci' => $voci,
+            'voci' => $voci_da_processare,
             'avviato_il' => current_time('mysql'),
             'completato_il' => null,
             'errori' => [],
         ];
+        
         set_transient('assia_job_embeddings', $job, HOUR_IN_SECONDS);
+        
         return $job;
     }
 
-    /** Esegue N voci per step (AJAX), salva embeddings e aggiorna progresso */
+    /**
+     * ✅ RILEVA MODIFICHE CON SNAPSHOT HASHATO
+     */
+    protected static function rileva_modifiche_snapshot( array $voci_nuove ): array {
+        $snapshot_old = get_option('assia_content_snapshot', []);
+        $snapshot_new = [];
+        $da_rigenerare = [];
+        
+        foreach ( $voci_nuove as $v ) {
+            $key = $v['fonte'] . '_' . $v['id'];
+            
+            $testo = ( $v['fonte'] === 'prodotto' )
+                ? self::costruisci_testo_prodotto( $v['id'] )
+                : self::testo_da_post( $v['id'] );
+            
+            if ( ! $testo ) continue;
+            
+            $hash_new = md5( $testo );
+            $snapshot_new[$key] = $hash_new;
+            
+            if ( ! isset($snapshot_old[$key]) || $snapshot_old[$key] !== $hash_new ) {
+                $da_rigenerare[] = $v;
+                
+                if ( isset($snapshot_old[$key]) ) {
+                    error_log("ASSIA SNAPSHOT: Modificato {$v['fonte']} ID {$v['id']}");
+                } else {
+                    error_log("ASSIA SNAPSHOT: Nuovo {$v['fonte']} ID {$v['id']}");
+                }
+            }
+        }
+        
+        $eliminati = array_diff_key( $snapshot_old, $snapshot_new );
+        
+        foreach ( $eliminati as $key => $hash ) {
+            $parts = explode('_', $key, 2);
+            if ( count($parts) === 2 ) {
+                $fonte = $parts[0];
+                $id = (int)$parts[1];
+                
+                self::rimuovi_embeddings( $fonte, $id );
+                error_log("ASSIA SNAPSHOT: Eliminato {$fonte} ID {$id}");
+            }
+        }
+        
+        update_option('assia_content_snapshot', $snapshot_new);
+        
+        $nuovi = count($da_rigenerare) - count(array_filter($da_rigenerare, function($v) use ($snapshot_old) {
+            return isset($snapshot_old[$v['fonte'] . '_' . $v['id']]);
+        }));
+        $modificati = count($da_rigenerare) - $nuovi;
+        $eliminati_count = count($eliminati);
+        
+        error_log(sprintf(
+            'ASSIA SNAPSHOT: Nuovi=%d, Modificati=%d, Eliminati=%d, Da rigenerare=%d',
+            $nuovi,
+            $modificati,
+            $eliminati_count,
+            count($da_rigenerare)
+        ));
+        
+        return $da_rigenerare;
+    }
+
+    protected static function rimuovi_embeddings( string $fonte, int $id_rif ): void {
+        global $wpdb;
+        $pref = $wpdb->prefix;
+        $modello = get_option('assia_modello_embedding', 'text-embedding-005');
+        
+        $deleted = $wpdb->delete(
+            "{$pref}assistente_ia_embeddings",
+            [
+                'fonte' => $fonte,
+                'id_riferimento' => $id_rif,
+                'modello' => $modello
+            ],
+            ['%s', '%d', '%s']
+        );
+        
+        if ( $deleted !== false && $deleted > 0 ) {
+            error_log("ASSIA: Rimossi {$deleted} embeddings per {$fonte} ID {$id_rif}");
+        }
+    }
+
     public static function esegui_job_passaggio( int $batch = 5 ): array {
         $job = get_transient('assia_job_embeddings');
         if ( ! is_array($job) ) { return [ 'errore' => 'Nessun job attivo' ]; }
+        
         $job['stato'] = 'in_corso';
         $tot = (int)$job['totale'];
         $i   = (int)$job['indice'];
@@ -258,26 +341,31 @@ class Assistente_IA_RAG {
 
             if ( ! $testo ) { continue; }
 
-            $chunks = self::spezza_testo( $testo, 800 );
+            $chunks = self::spezza_testo_smart( $testo, 800 );
+            
             $indice_chunk = 0;
             foreach( $chunks as $ch ){
                 $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [
                     'id_chat' => null,
                     'hash_sessione' => null
                 ] );
+                
                 if ( empty($emb['vettore']) ) { 
                     $job['errori'][] = "Embedding vuoto per {$fonte} {$pid}"; 
                     continue; 
                 }
+                
                 self::salva_embedding( $fonte, $pid, $indice_chunk++, $ch, $emb['vettore'], $modello );
                 $job['creati']++;
             }
         }
 
         $job['indice'] = $i;
+        
         if ( $i >= $tot ) {
             $job['stato'] = 'completato';
             $job['completato_il'] = current_time('mysql');
+            
             self::appendi_log_embeddings([
                 'avviato_il' => $job['avviato_il'],
                 'completato_il' => $job['completato_il'],
@@ -286,15 +374,17 @@ class Assistente_IA_RAG {
                 'chunks_creati' => $job['creati'],
                 'errori' => $job['errori'],
             ]);
+            
             delete_transient('assia_job_embeddings');
         } else {
             set_transient('assia_job_embeddings', $job, HOUR_IN_SECONDS);
         }
+        
         $job['percentuale'] = ($tot > 0) ? round(($job['indice'] / $tot) * 100) : 100;
+        
         return $job;
     }
 
-    /** Stato del job per eventuale polling */
     public static function stato_job(): array {
         $job = get_transient('assia_job_embeddings');
         if ( ! is_array($job) ) { return [ 'stato' => 'nessun_job' ]; }
@@ -303,7 +393,6 @@ class Assistente_IA_RAG {
         return $job;
     }
 
-    /** Log conciso delle ultime rigenerazioni (max 10) */
     protected static function appendi_log_embeddings( array $voce ): void {
         $log = get_option('assia_log_embeddings', []);
         if ( ! is_array($log) ) $log = [];
@@ -313,16 +402,72 @@ class Assistente_IA_RAG {
     }
 
     /** 
-     * Rigenerazione sincrona (legacy) 
-     * Ora rispetta la selezione manuale dei contenuti
+     * ✅ CHUNKING INTELLIGENTE CON OVERLAP DI FRASI
      */
+    protected static function spezza_testo_smart( string $testo, int $size = 800 ): array {
+        $overlap = (int) get_option('assia_chunk_overlap', 100);
+        
+        if ( $overlap <= 0 ) {
+            return self::spezza_testo_legacy( $testo, $size );
+        }
+        
+        $frasi = preg_split('/(?<=[.!?])\s+/u', $testo, -1, PREG_SPLIT_NO_EMPTY);
+        
+        if ( empty($frasi) ) {
+            return [ $testo ];
+        }
+        
+        $chunks = [];
+        $current_chunk = [];
+        $current_length = 0;
+        
+        foreach ( $frasi as $frase ) {
+            $frase_len = mb_strlen( $frase );
+            
+            if ( $current_length + $frase_len > $size && ! empty($current_chunk) ) {
+                $chunks[] = implode(' ', $current_chunk);
+                
+                $chunk_text = implode(' ', $current_chunk);
+                $parole = explode(' ', $chunk_text);
+                $overlap_words = array_slice( $parole, -$overlap );
+                
+                $current_chunk = $overlap_words;
+                $current_length = mb_strlen( implode(' ', $current_chunk) );
+            }
+            
+            $current_chunk[] = $frase;
+            $current_length += $frase_len + 1;
+        }
+        
+        if ( ! empty($current_chunk) ) {
+            $chunks[] = implode(' ', $current_chunk);
+        }
+        
+        return $chunks;
+    }
+
+    protected static function spezza_testo_legacy( string $t, int $n ): array {
+        $ris = [];
+        $t = trim($t);
+        while( strlen($t) > $n ){
+            $pos = strrpos( substr($t,0,$n), ' ' );
+            if ( false === $pos ) $pos = $n;
+            $ris[] = substr($t,0,$pos);
+            $t = ltrim( substr($t,$pos) );
+        }
+        if ( $t !== '' ) $ris[] = $t;
+        return $ris;
+    }
+
     public static function rigenera_indice_post(): int {
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) return 0;
 
+        $auto_regen = get_option('assia_auto_regenerate_hash', 'si') === 'si';
         $conteggio = 0;
         $modello   = get_option('assia_modello_embedding','text-embedding-005');
         $avvio     = current_time('mysql');
         $errori    = [];
+        
         global $wpdb; $pref = $wpdb->prefix;
 
         $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
@@ -334,24 +479,31 @@ class Assistente_IA_RAG {
             ) );
 
             $testo = ( $fonte === 'prodotto' )
-                ? Assistente_IA_RAG::costruisci_testo_prodotto( $pid )
-                : Assistente_IA_RAG::testo_da_post( $pid );
+                ? self::costruisci_testo_prodotto( $pid )
+                : self::testo_da_post( $pid );
 
             if ( ! $testo ) return;
 
-            $chunks = Assistente_IA_RAG::spezza_testo( $testo, 800 );
+            $chunks = self::spezza_testo_smart( $testo, 800 );
             $indice = 0;
+            
             foreach( $chunks as $ch ){
                 $emb = Assistente_IA_Modello_Vertex::calcola_embedding( $ch, [
                     'id_chat' => null, 'hash_sessione' => null
                 ] );
-                if ( empty($emb['vettore']) ) { $errori[] = "Embedding vuoto per {$fonte} {$pid}"; continue; }
-                Assistente_IA_RAG::salva_embedding( $fonte, $pid, $indice++, $ch, $emb['vettore'], $modello );
+                
+                if ( empty($emb['vettore']) ) { 
+                    $errori[] = "Embedding vuoto per {$fonte} {$pid}"; 
+                    continue; 
+                }
+                
+                self::salva_embedding( $fonte, $pid, $indice++, $ch, $emb['vettore'], $modello );
                 $conteggio++;
             }
         };
 
-        // Post/Pagine selezionati
+        $voci_tutte = [];
+        
         if ( class_exists('Assistente_IA_Content_Selector') ) {
             $selected_ids = Assistente_IA_Content_Selector::get_selected_content_ids();
         } else {
@@ -363,29 +515,41 @@ class Assistente_IA_RAG {
             $pid = (int)$pid;
             $status = get_post_status($pid);
             if ( $status === 'publish' ) {
-                $processa('post', $pid); 
+                $voci_tutte[] = ['fonte' => 'post', 'id' => $pid];
             }
         }
 
-        // Prodotti WooCommerce (sempre inclusi)
         if ( self::woo_attivo() ) {
             $qp = new WP_Query([ 'post_type'=>['product'], 'post_status'=>'publish', 'posts_per_page'=>-1, 'fields'=>'ids' ]);
-            foreach( ($qp->posts ?? []) as $pid ){ $processa('prodotto', (int)$pid); }
+            foreach( ($qp->posts ?? []) as $pid ){ 
+                $voci_tutte[] = ['fonte' => 'prodotto', 'id' => (int)$pid];
+            }
             wp_reset_postdata();
+        }
+
+        if ( $auto_regen ) {
+            $voci_da_processare = self::rileva_modifiche_snapshot( $voci_tutte );
+        } else {
+            $voci_da_processare = $voci_tutte;
+        }
+
+        foreach ( $voci_da_processare as $v ) {
+            $processa($v['fonte'], $v['id']);
         }
 
         self::appendi_log_embeddings([
             'avviato_il' => $avvio,
             'completato_il' => current_time('mysql'),
             'modello' => $modello,
-            'tot_voci' => count($selected_ids) + (self::woo_attivo() ? count($qp->posts ?? []) : 0),
+            'tot_voci' => count($voci_da_processare),
             'chunks_creati' => $conteggio,
             'errori' => $errori,
         ]);
+        
         return $conteggio;
     }
 
-    /** ------ Fallback keyword su WP (titolo/contenuto) ------ */
+    /** Fallback keyword */
     protected static function fallback_keyword( string $query, int $limite = 3 ): array {
         global $wpdb;
         $q = trim( wp_strip_all_tags( $query ) );
@@ -417,7 +581,6 @@ class Assistente_IA_RAG {
         return $schede;
     }
 
-    /** Converte array schede → stringa contesto (con separatore) */
     protected static function schede_to_contesto( array $schede ): string {
         if ( empty($schede) ) return '';
         $pulite = [];
@@ -436,151 +599,78 @@ class Assistente_IA_RAG {
         return $pulite;
     }
 
-    /**
- * ========================================
- * ESTRAZIONE TESTO DA POST/PAGINA
- * VERSIONE ULTRA-AGGRESSIVA: Rimuove TUTTO tranne il testo
- * ======================================== 
- */
-/**
- * ========================================
- * ESTRAZIONE TESTO DA POST/PAGINA
- * APPROCCIO MATES: apply_filters('the_content') + strip_tags
- * ======================================== 
- */
-protected static function testo_da_post( int $pid ): string {
-    global $post;
-    $post_originale = $post;
-    
-    // Carica il post
-    $post = get_post( $pid );
-    if ( ! $post ) {
-        return '';
-    }
-    
-    // Setup postdata per garantire il contesto corretto
-    setup_postdata( $post );
-    
-    // Cattura titolo e estratto
-    $titolo = get_the_title( $pid );
-    $estratto = get_the_excerpt( $pid );
-    
-    // ============================================
-    // FASE 1: RENDERIZZA IL CONTENUTO
-    // Questo fa funzionare Divi, Elementor, Visual Composer, ecc.
-    // ============================================
-    $contenuto_raw = $post->post_content;
-    
-    // IMPORTANTE: apply_filters('the_content') fa renderizzare i page builder!
-    $contenuto_renderizzato = apply_filters( 'the_content', $contenuto_raw );
-    
-    // ============================================
-    // FASE 2: RIMUOVI SCRIPT E STYLE (prima di strip_tags)
-    // ============================================
-    $contenuto_renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $contenuto_renderizzato);
-    $contenuto_renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $contenuto_renderizzato);
-    $contenuto_renderizzato = preg_replace('/<!--(.*)-->/Uis', '', $contenuto_renderizzato);
-    
-    // ============================================
-    // FASE 3: STRIP HTML TAGS
-    // ============================================
-    $testo = wp_strip_all_tags( $contenuto_renderizzato );
-    
-    // ============================================
-    // FASE 4: PULIZIA FINALE
-    // ============================================
-    
-    // Decodifica entità HTML
-    $testo = html_entity_decode($testo, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    
-    // Normalizza spazi multipli
-    $testo = preg_replace('/\s+/', ' ', $testo);
-    
-    // Rimuovi caratteri di controllo
-    $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo);
-    
-    // Trim
-    $testo = trim( $testo );
-    
-    // ============================================
-    // FASE 5: PULIZIA RESIDUI CSS/CODICE (se presenti)
-    // ============================================
-    
-    // Rimuovi colori hex (#RRGGBB o #RGB)
-    $testo = preg_replace('/#[0-9a-fA-F]{3,6}\b/', '', $testo);
-    
-    // Rimuovi rgba/rgb
-    $testo = preg_replace('/rgba?\([^)]+\)/', '', $testo);
-    
-    // Rimuovi pattern CSS tipo "property: value;"
-    $testo = preg_replace('/[a-z\-]+\s*:\s*[^;]+;?/i', '', $testo);
-    
-    // Rimuovi unità CSS (px, em, rem, %, vh, vw, ecc)
-    $testo = preg_replace('/\d+(?:px|em|rem|%|vh|vw|pt)\b/i', '', $testo);
-    
-    // Normalizza spazi di nuovo dopo la pulizia
-    $testo = preg_replace('/\s+/', ' ', trim($testo));
-    
-    // ============================================
-    // FASE 6: RESET POST DATA
-    // ============================================
-    wp_reset_postdata();
-    $post = $post_originale;
-    
-    // ============================================
-    // FASE 7: ASSEMBLA RISULTATO
-    // ============================================
-    
-    // Pulisci estratto
-    $estratto = wp_strip_all_tags( $estratto );
-    $estratto = html_entity_decode($estratto, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    $estratto = preg_replace('/\s+/', ' ', trim($estratto));
-    
-    $link = get_permalink( $pid );
-
-    $blocchi = [];
-    
-    if ( $titolo ) {
-        $blocchi[] = "Titolo: " . $titolo;
-    }
-    
-    if ( $estratto && strlen($estratto) > 10 ) {
-        $blocchi[] = "Estratto: " . $estratto;
-    }
-    
-    if ( $testo && strlen($testo) > 50 ) {
-        $blocchi[] = "Contenuto: " . $testo;
-    } else {
-        // Log se il testo è troppo breve (possibile problema)
-        if ( current_user_can('manage_options') ) {
-            error_log("ASSIA RAG: Post ID {$pid} ({$titolo}) ha testo molto breve dopo pulizia: " . strlen($testo) . " caratteri");
+    protected static function testo_da_post( int $pid ): string {
+        global $post;
+        $post_originale = $post;
+        
+        $post = get_post( $pid );
+        if ( ! $post ) {
+            return '';
         }
+        
+        setup_postdata( $post );
+        
+        $titolo = get_the_title( $pid );
+        $estratto = get_the_excerpt( $pid );
+        
+        $contenuto_raw = $post->post_content;
+        $contenuto_renderizzato = apply_filters( 'the_content', $contenuto_raw );
+        
+        $contenuto_renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $contenuto_renderizzato);
+        $contenuto_renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $contenuto_renderizzato);
+        $contenuto_renderizzato = preg_replace('/<!--(.*)-->/Uis', '', $contenuto_renderizzato);
+        
+        $testo = wp_strip_all_tags( $contenuto_renderizzato );
+        
+        $testo = html_entity_decode($testo, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $testo = preg_replace('/\s+/', ' ', $testo);
+        $testo = preg_replace('/[\x00-\x1F\x7F]/u', '', $testo);
+        $testo = trim( $testo );
+        
+        $testo = preg_replace('/#[0-9a-fA-F]{3,6}\b/', '', $testo);
+        $testo = preg_replace('/rgba?\([^)]+\)/', '', $testo);
+        $testo = preg_replace('/[a-z\-]+\s*:\s*[^;]+;?/i', '', $testo);
+        $testo = preg_replace('/\d+(?:px|em|rem|%|vh|vw|pt)\b/i', '', $testo);
+        
+        $testo = preg_replace('/\s+/', ' ', trim($testo));
+        
+        wp_reset_postdata();
+        $post = $post_originale;
+        
+        $estratto = wp_strip_all_tags( $estratto );
+        $estratto = html_entity_decode($estratto, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $estratto = preg_replace('/\s+/', ' ', trim($estratto));
+        
+        $link = get_permalink( $pid );
+
+        $blocchi = [];
+        
+        if ( $titolo ) {
+            $blocchi[] = "Titolo: " . $titolo;
+        }
+        
+        if ( $estratto && strlen($estratto) > 10 ) {
+            $blocchi[] = "Estratto: " . $estratto;
+        }
+        
+        if ( $testo && strlen($testo) > 50 ) {
+            $blocchi[] = "Contenuto: " . $testo;
+        } else {
+            if ( current_user_can('manage_options') ) {
+                error_log("ASSIA RAG: Post ID {$pid} ({$titolo}) ha testo molto breve: " . strlen($testo) . " caratteri");
+            }
+        }
+        
+        if ( $link ) {
+            $blocchi[] = "Link: " . $link;
+        }
+
+        $risultato = trim( implode("\n", $blocchi) );
+        $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
+        
+        return $risultato;
     }
-    
-    if ( $link ) {
-        $blocchi[] = "Link: " . $link;
-    }
 
-    $risultato = trim( implode("\n", $blocchi) );
-    
-    // Applica filtro per permettere customizzazioni
-    $risultato = apply_filters( 'assia_rag_testo_post', $risultato, $pid );
-    
-    return $risultato;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-    /** ------ Testo descrittivo del prodotto WooCommerce (con pulizia migliorata) ------ */
     protected static function costruisci_testo_prodotto( int $product_id ): string {
         if ( ! self::woo_attivo() ) return '';
         $p = wc_get_product( $product_id );
@@ -593,7 +683,6 @@ protected static function testo_da_post( int $pid ): string {
 
         $nome = get_the_title( $product_id );
         
-        // Short description con pulizia aggressiva
         $short_raw = $p->get_short_description();
         $short_rendered = do_shortcode( $short_raw );
         $short_rendered = apply_filters( 'the_content', $short_rendered );
@@ -603,7 +692,6 @@ protected static function testo_da_post( int $pid ): string {
         $short = wp_strip_all_tags( $short_rendered );
         $short = preg_replace('/\s+/', ' ', trim($short));
         
-        // Description con pulizia aggressiva
         $desc_raw = $p->get_description();
         $desc_rendered = do_shortcode( $desc_raw );
         $desc_rendered = apply_filters( 'the_content', $desc_rendered );
@@ -638,26 +726,10 @@ protected static function testo_da_post( int $pid ): string {
         return $risultato;
     }
 
-    /** WooCommerce presente? */
     protected static function woo_attivo(): bool {
         return class_exists('WooCommerce') || function_exists('wc_get_product');
     }
 
-    /** Spezza testo in chunk "quasi parola" da N caratteri */
-    protected static function spezza_testo( string $t, int $n ): array {
-        $ris = [];
-        $t = trim($t);
-        while( strlen($t) > $n ){
-            $pos = strrpos( substr($t,0,$n), ' ' );
-            if ( false === $pos ) $pos = $n;
-            $ris[] = substr($t,0,$pos);
-            $t = ltrim( substr($t,$pos) );
-        }
-        if ( $t !== '' ) $ris[] = $t;
-        return $ris;
-    }
-
-    /** Insert helper */
     protected static function salva_embedding( string $fonte, int $id_rif, int $i, string $chunk, array $vettore, string $modello = '' ): void {
         global $wpdb; $pref = $wpdb->prefix;
         if ( $modello === '' ) { $modello = get_option('assia_modello_embedding','text-embedding-005'); }
@@ -672,7 +744,6 @@ protected static function testo_da_post( int $pid ): string {
         ] );
     }
 
-    /** Similarità coseno tra due vettori */
     protected static function coseno( array $a, array $b ): float {
         $dot=0; $na=0; $nb=0; $len = min( count($a), count($b) );
         for($i=0;$i<$len;$i++){ $dot += $a[$i]*$b[$i]; $na += $a[$i]*$a[$i]; $nb += $b[$i]*$b[$i]; }

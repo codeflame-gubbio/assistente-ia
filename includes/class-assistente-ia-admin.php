@@ -3,6 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Pannello impostazioni + Diagnostica + Diagnostica Modello + Archivio conversazioni.
+ * VERSIONE CON SNAPSHOT HASHATO + CHUNKING OVERLAP + MODALITÀ RECUPERO
  */
 class Assistente_IA_Admin {
 
@@ -21,7 +22,6 @@ public function aggiungi_menu(){
         [ $this, 'pagina_impostazioni' ], 'dashicons-format-chat', 58
     );
 
-    // Ripristina la voce "Impostazioni" sotto il menu Assistente IA
     add_submenu_page(
         'assia', 'Impostazioni', 'Impostazioni', 'manage_options', 'assia',
         [ $this, 'pagina_impostazioni' ]
@@ -75,7 +75,11 @@ public function aggiungi_menu(){
             'assia_context_wc',
             'assia_context_brief_enable',
             'assia_registro_modello_max',
-            'assia_registro_modello_retention_giorni'
+            'assia_registro_modello_retention_giorni',
+            // ✅ NUOVE OPZIONI
+            'assia_rag_mode',              // 'best-1' o 'top-k'
+            'assia_chunk_overlap',         // Overlap in parole (default: 100)
+            'assia_auto_regenerate_hash',  // 'si' o 'no'
         );
         foreach($opts as $o){ register_setting('assia_opt', $o); }
     }
@@ -94,7 +98,8 @@ public function carica_script_admin( $hook ){
     /** ------------------ PAGINA IMPOSTAZIONI ------------------ */
     public function pagina_impostazioni(){
         if(isset($_POST['rigenera_embeddings'])&&current_user_can('manage_options')){
-            check_admin_referer('assia_rigenera_embeddings'); $n=Assistente_IA_RAG::rigenera_indice_post();
+            check_admin_referer('assia_rigenera_embeddings'); 
+            $n=Assistente_IA_RAG::rigenera_indice_post();
             echo '<div class="updated"><p>Rigenerati '.intval($n).' chunks.</p></div>';
         } ?>
         <div class="wrap"><h1>Assistente IA – Impostazioni</h1>
@@ -152,14 +157,59 @@ public function carica_script_admin( $hook ){
                     <option value="no" <?php selected(get_option('assia_attiva_embeddings','si'),'no');?>>No</option>
                 </select>
             </td></tr>
+            
+            <!-- ✅ NUOVA OPZIONE: Modalità recupero -->
+            <tr>
+                <th>Modalità recupero</th>
+                <td>
+                    <select name="assia_rag_mode">
+                        <option value="top-k" <?php selected(get_option('assia_rag_mode','top-k'),'top-k');?>>Top-K (multipli chunk)</option>
+                        <option value="best-1" <?php selected(get_option('assia_rag_mode','top-k'),'best-1');?>>Best-1 (singolo migliore)</option>
+                    </select>
+                    <p class="description">
+                        <strong>Top-K:</strong> Recupera i 3-10 chunk più rilevanti (ideale per documentazione complessa)<br>
+                        <strong>Best-1:</strong> Solo il chunk migliore (risparmia token, ideale per e-commerce semplice)
+                    </p>
+                </td>
+            </tr>
+            
             <tr><th>Top-K chunks</th><td>
                 <input type="number" name="assia_embeddings_top_k" value="<?php echo esc_attr(get_option('assia_embeddings_top_k',3)); ?>" min="1" max="20">
-                <p class="description">Numero massimo di chunk da recuperare per query</p>
+                <p class="description">Numero massimo di chunk da recuperare (solo se modalità = Top-K)</p>
             </td></tr>
+            
             <tr><th>Threshold similarità minima</th><td>
                 <input type="number" step="0.01" name="assia_embeddings_threshold" value="<?php echo esc_attr(get_option('assia_embeddings_threshold','0.30')); ?>" min="0" max="1">
                 <p class="description">Score minimo per considerare un chunk rilevante (0.30 consigliato). Valori più alti = più selettivo.</p>
             </td></tr>
+            
+            <!-- ✅ NUOVA OPZIONE: Overlap chunking -->
+            <tr>
+                <th>Overlap chunking (parole)</th>
+                <td>
+                    <input type="number" name="assia_chunk_overlap" value="<?php echo esc_attr(get_option('assia_chunk_overlap',100)); ?>" min="0" max="300">
+                    <p class="description">
+                        Parole di sovrapposizione tra chunk consecutivi (default: 100).<br>
+                        Migliora la qualità del recupero mantenendo contesto tra chunk.<br>
+                        0 = disattiva overlap (vecchio comportamento)
+                    </p>
+                </td>
+            </tr>
+            
+            <!-- ✅ NUOVA OPZIONE: Auto-rigenerazione -->
+            <tr>
+                <th>Rigenerazione intelligente</th>
+                <td>
+                    <select name="assia_auto_regenerate_hash">
+                        <option value="si" <?php selected(get_option('assia_auto_regenerate_hash','si'),'si');?>>Sì (consigliato)</option>
+                        <option value="no" <?php selected(get_option('assia_auto_regenerate_hash','si'),'no');?>>No</option>
+                    </select>
+                    <p class="description">
+                        Se attivo, rigenera automaticamente solo i contenuti modificati confrontando hash MD5.<br>
+                        <strong>Vantaggi:</strong> Risparmia tempo e API calls, rileva automaticamente post/prodotti aggiornati.
+                    </p>
+                </td>
+            </tr>
         </table>
 
         <h2>Widget chat</h2>
