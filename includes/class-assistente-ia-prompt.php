@@ -3,7 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Costruzione del prompt contestuale (obiettivo, avviso, riassunto chat, ultimi turni, RAG).
- * VERSIONE CON CONTESTO PAGINA AUMENTATO A 500 PAROLE
+ * VERSIONE CON PRIORITÀ ASSOLUTA ALLA PAGINA CORRENTE
  */
 class Assistente_IA_Prompt {
 
@@ -21,9 +21,9 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         if ( $p && $p->post_status === 'publish' && empty($p->post_password) ) {
             $tit = get_the_title($p);
             $url = get_permalink($p);
-            // ✅ AUMENTATO DA 40 A 500 PAROLE
+            // ✅ 500 PAROLE dalla pagina corrente
             $estr = wp_trim_words( wp_strip_all_tags( get_the_excerpt($p) ?: $p->post_content ), 500 );
-            $contesto_pagina = "Titolo: {$tit}\nURL: {$url}\nRiassunto: {$estr}";
+            $contesto_pagina = "Titolo: {$tit}\nURL: {$url}\nContenuto: {$estr}";
         }
     }
 
@@ -69,7 +69,7 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         }
     }
 
-    // ✅ COSTRUZIONE PROMPT COMPLETO
+    // ✅ COSTRUZIONE PROMPT CON PRIORITÀ PAGINA CORRENTE
     $blocchi = [];
 
     // 1. Obiettivo (se presente)
@@ -77,65 +77,72 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         $blocchi[] = "[Obiettivo]\n" . trim($obiettivo);
     }
 
-    // 2. Regole di stile (SEMPRE)
-    $blocchi[] = "[Stile e Regole - LEGGI ATTENTAMENTE]\n".
-        "1) PRIORITÀ ASSOLUTA: Usa ESCLUSIVAMENTE il [Contesto pertinente] come fonte.\n".
-        "   - Ogni chunk nel contesto inizia con [Fonte: Nome]. Quando rispondi, cita la fonte.\n".
-        "   - Esempio: \"Come spiegato nella pagina 'Vetrina PRO', il servizio include...\"\n".
+    // 2. Regole di stile - RIVISTE PER PRIORITÀ PAGINA
+    $blocchi[] = "[Stile e Regole - SEGUI ATTENTAMENTE]\n".
+        "🎯 PRIORITÀ NELLE FONTI (dall'alto verso il basso):\n".
+        "1. **PAGINA CORRENTE** - Se l'utente sta visitando una pagina specifica, USA PRINCIPALMENTE il suo contenuto\n".
+        "2. **Contesto pertinente (RAG)** - Usa per approfondire, confermare o aggiungere dettagli correlati\n".
+        "3. **Dettagli prodotto** - Se su una pagina prodotto WooCommerce, includi specifiche tecniche\n".
         "\n".
-        "2) SE LA RISPOSTA È NEL CONTESTO:\n".
-        "   - Rispondi in modo diretto, naturale e completo\n".
-        "   - Cita la fonte principale tra quelle nel contesto\n".
-        "   - Usa un tono conversazionale, non robotico\n".
-        "   - Se ci sono link, includili nella risposta\n".
+        "📝 COME RISPONDERE:\n".
+        "- Se c'è [Pagina corrente]: PARTI DA LÌ. Sintetizza il contenuto in modo completo e utile\n".
+        "- Usa [Contesto pertinente] per ARRICCHIRE, non per sostituire\n".
+        "- Cita le fonti naturalmente: \"Come spiegato in questa pagina...\" o \"Secondo la pagina 'Nome'...\"\n".
+        "- Tono conversazionale, diretto, professionale\n".
+        "- Risposte CONCRETE: dati, caratteristiche, benefici specifici\n".
         "\n".
-        "3) SE LA RISPOSTA NON È NEL CONTESTO:\n".
-        "   - Dillo chiaramente: \"Non ho informazioni specifiche su [argomento] nella nostra base di conoscenza.\"\n".
-        "   - NON inventare, NON fare supposizioni\n".
-        "   - Suggerisci argomenti correlati presenti nel contesto, se pertinenti\n".
-        "   - Esempio: \"Non trovo info su ActiveCampaign, ma posso aiutarti con Vetrina PRO o i nostri servizi di automazione.\"\n".
+        "❌ EVITA ASSOLUTAMENTE:\n".
+        "- Risposte vaghe tipo \"è un sito per catturare clienti\" quando hai 500 parole di dettagli\n".
+        "- Dire \"non ho informazioni\" quando [Pagina corrente] è piena di info\n".
+        "- Frasi come «consulta la sezione X» - SEI TU che deve spiegare!\n".
+        "- Disclaimer tipo «non ho accesso al sito» - SEI il sito!\n".
+        "- Inventare dati non presenti nelle fonti\n".
         "\n".
-        "4) EVITA ASSOLUTAMENTE:\n".
-        "   - Frasi come «non ho accesso al sito» (SEI il sito!)\n".
-        "   - Disclaimer generici («come assistente IA...»)\n".
-        "   - Inventare dati, prezzi o caratteristiche non presenti\n".
+        "✅ ESEMPI DI RISPOSTE CORRETTE:\n".
+        "❌ MALE: \"Vetrina PRO è un sito ideato per catturare clienti. Consulta la homepage.\"\n".
+        "✅ BENE: \"Vetrina PRO ti offre una landing page professionale con design responsive, form di contatto integrato, \n".
+        "          ottimizzazione SEO, analytics configurato e hosting incluso per 12 mesi. Il tutto ottimizzato \n".
+        "          per massimizzare le conversioni dei tuoi visitatori in clienti.\"\n".
         "\n".
-        "5) STILE:\n".
-        "   - Italiano naturale e professionale\n".
-        "   - Risposte sintetiche ma complete\n".
-        "   - Usa elenchi puntati per informazioni multiple\n".
-        "   - Mantieni un tono amichevole ma competente";
+        "🎯 OBIETTIVO: Dare valore IMMEDIATO all'utente, non rimandarlo altrove!";
 
-    // 3. Contesto pertinente (RAG) - IL PIÙ IMPORTANTE!
-    if ( $estratti ) {
-        $blocchi[] = "[Contesto pertinente]\n" . trim($estratti);
-    } else {
-        $blocchi[] = "[Contesto pertinente]\nNessun contenuto trovato nella base di conoscenza per questa domanda.";
-    }
-
-    // 4. Contesto pagina corrente (se presente) - ORA CON 500 PAROLE!
+    // ✅ 3. PAGINA CORRENTE - PRIMA POSIZIONE (massima priorità)
     if ( $contesto_pagina ) {
-        $blocchi[] = "[Pagina corrente]\n" . trim($contesto_pagina);
+        $blocchi[] = "⭐ [PAGINA CORRENTE - FONTE PRIMARIA]\n" . 
+                     "L'utente sta visitando questa pagina. Usa QUESTO contenuto come base della tua risposta:\n\n" .
+                     trim($contesto_pagina);
     }
 
-    // 5. Contesto WooCommerce (se presente)
+    // 4. Contesto WooCommerce (se presente)
     if ( $contesto_wc ) {
-        $blocchi[] = "[Dettagli prodotto]\n" . trim($contesto_wc);
+        $blocchi[] = "[Dettagli Prodotto]\n" . trim($contesto_wc);
     }
 
-    // 6. Mini-brief specifico (se presente)
+    // 5. Mini-brief specifico (se presente)
     if ( $contesto_brief ) {
-        $blocchi[] = "[Contesto editoriale]\n" . trim($contesto_brief);
+        $blocchi[] = "[Contesto Editoriale]\n" . trim($contesto_brief);
+    }
+
+    // 6. Contesto pertinente RAG - SECONDA POSIZIONE (supporto/approfondimento)
+    if ( $estratti ) {
+        $blocchi[] = "[Contesto Pertinente - APPROFONDIMENTI]\n" . 
+                     "Usa queste informazioni per arricchire o confermare quanto nella pagina corrente:\n\n" .
+                     trim($estratti);
+    } else {
+        // Solo se non c'è pagina corrente, segnala assenza RAG
+        if ( empty($contesto_pagina) ) {
+            $blocchi[] = "[Contesto Pertinente]\nNessun contenuto trovato nella base di conoscenza.";
+        }
     }
 
     // 7. Riassunto conversazione (se presente)
     if ( $riassunto ) {
-        $blocchi[] = "[Riassunto conversazione]\n" . trim($riassunto);
+        $blocchi[] = "[Riassunto Conversazione]\n" . trim($riassunto);
     }
 
     // 8. Ultimi turni conversazione (se presenti)
     if ( $ultimi ) {
-        $blocchi[] = "[Conversazione recente]\n" . trim($ultimi);
+        $blocchi[] = "[Conversazione Recente]\n" . trim($ultimi);
     }
 
     // 9. Avviso (se presente)
@@ -143,8 +150,8 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
         $blocchi[] = "[Avviso]\n" . trim($avviso);
     }
 
-    // 10. LA DOMANDA DELL'UTENTE (FONDAMENTALE!)
-    $blocchi[] = "[Domanda utente]\n" . trim($domanda);
+    // 10. LA DOMANDA DELL'UTENTE (sempre per ultima)
+    $blocchi[] = "[Domanda Utente]\n" . trim($domanda);
 
     return implode("\n\n", $blocchi);
 }

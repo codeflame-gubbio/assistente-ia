@@ -3,9 +3,10 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * RAG AVANZATO con:
- * - Sistema snapshot hashato completo (rileva aggiunti/modificati/eliminati)
+ * - Sistema snapshot hashato completo
  * - Chunking intelligente con overlap di frasi
  * - Modalità recupero BEST-1 vs TOP-K
+ * - Chunk size aumentato a 1200 caratteri per maggiore contesto
  */
 class Assistente_IA_RAG {
 
@@ -107,8 +108,9 @@ class Assistente_IA_RAG {
             
             $fonte_header = self::get_chunk_header($p['fonte'], $p['id_riferimento']);
             
+            // ✅ Aumentato limite a 1500 caratteri per chunk più completi
             $chunk_formattato = $fonte_header . "\n" . 
-                               Assistente_IA_Utilita::tronca($testo_pulito, 1200);
+                               Assistente_IA_Utilita::tronca($testo_pulito, 1500);
             
             $estratti[] = $chunk_formattato;
         }
@@ -161,9 +163,6 @@ class Assistente_IA_RAG {
         return "[Fonte: Contenuto ID {$id_riferimento}]";
     }
 
-    /** 
-     * ✅ PREPARA JOB CON SNAPSHOT HASHATO
-     */
     public static function prepara_job_indicizzazione(): array {
         $auto_regen = get_option('assia_auto_regenerate_hash', 'si') === 'si';
         
@@ -228,9 +227,6 @@ class Assistente_IA_RAG {
         return $job;
     }
 
-    /**
-     * ✅ RILEVA MODIFICHE CON SNAPSHOT HASHATO
-     */
     protected static function rileva_modifiche_snapshot( array $voci_nuove ): array {
         $snapshot_old = get_option('assia_content_snapshot', []);
         $snapshot_new = [];
@@ -341,7 +337,8 @@ class Assistente_IA_RAG {
 
             if ( ! $testo ) { continue; }
 
-            $chunks = self::spezza_testo_smart( $testo, 800 );
+            // ✅ Chunk size aumentato a 1200 caratteri
+            $chunks = self::spezza_testo_smart( $testo, 1200 );
             
             $indice_chunk = 0;
             foreach( $chunks as $ch ){
@@ -403,8 +400,9 @@ class Assistente_IA_RAG {
 
     /** 
      * ✅ CHUNKING INTELLIGENTE CON OVERLAP DI FRASI
+     * Default size aumentato a 1200 caratteri
      */
-    protected static function spezza_testo_smart( string $testo, int $size = 800 ): array {
+    protected static function spezza_testo_smart( string $testo, int $size = 1200 ): array {
         $overlap = (int) get_option('assia_chunk_overlap', 100);
         
         if ( $overlap <= 0 ) {
@@ -484,7 +482,7 @@ class Assistente_IA_RAG {
 
             if ( ! $testo ) return;
 
-            $chunks = self::spezza_testo_smart( $testo, 800 );
+            $chunks = self::spezza_testo_smart( $testo, 1200 );
             $indice = 0;
             
             foreach( $chunks as $ch ){
@@ -549,7 +547,6 @@ class Assistente_IA_RAG {
         return $conteggio;
     }
 
-    /** Fallback keyword */
     protected static function fallback_keyword( string $query, int $limite = 3 ): array {
         global $wpdb;
         $q = trim( wp_strip_all_tags( $query ) );
@@ -585,7 +582,7 @@ class Assistente_IA_RAG {
         if ( empty($schede) ) return '';
         $pulite = [];
         foreach($schede as $s){
-            $pulite[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($s), 1200 );
+            $pulite[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($s), 1500 );
         }
         return implode("\n---\n", $pulite);
     }
@@ -594,7 +591,7 @@ class Assistente_IA_RAG {
         if ( empty($schede) ) return [];
         $pulite = [];
         foreach($schede as $s){
-            $pulite[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($s), 1200 );
+            $pulite[] = Assistente_IA_Utilita::tronca( Assistente_IA_Utilita::pulisci_testo($s), 1500 );
         }
         return $pulite;
     }
