@@ -229,6 +229,25 @@ class Assistente_IA_RAG {
 
     protected static function rileva_modifiche_snapshot( array $voci_nuove ): array {
         $snapshot_old = get_option('assia_content_snapshot', []);
+
+  // ✅ FIX: Se lo snapshot è vuoto, rigenera tutto
+    if ( empty($snapshot_old) ) {
+        error_log('ASSIA SNAPSHOT: Snapshot vuoto, rigenerazione completa');
+        $snapshot_new = [];
+        foreach ( $voci_nuove as $v ) {
+            $key = $v['fonte'] . '_' . $v['id'];
+            $testo = ( $v['fonte'] === 'prodotto' )
+                ? self::costruisci_testo_prodotto( $v['id'] )
+                : self::testo_da_post( $v['id'] );
+            if ( ! $testo ) continue;
+            $snapshot_new[$key] = md5( $testo );
+        }
+        update_option('assia_content_snapshot', $snapshot_new);
+        return $voci_nuove; // Ritorna TUTTO per rigenerare
+    }
+
+
+
         $snapshot_new = [];
         $da_rigenerare = [];
         
