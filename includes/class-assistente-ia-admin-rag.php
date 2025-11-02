@@ -1,6 +1,9 @@
 <?php
 if ( ! defined('ABSPATH') ) exit;
 
+/**
+ * ✅ FIX v5.4.0: Rimosso wp_localize_script duplicato dal metodo render()
+ */
 class Assistente_IA_Admin_RAG {
 
     public static function init(){
@@ -41,8 +44,11 @@ class Assistente_IA_Admin_RAG {
     public static function maybe_enqueue_assets($hook){
         $is_rag = ( isset($_GET['page']) && $_GET['page'] === 'assistente-ia-rag' );
         if ( ! $is_rag ) return;
+        
         $nonce = wp_create_nonce('assia_rag_nonce');
         wp_enqueue_script('assia-rag-admin');
+        
+        // ✅ FIX: Unico localize_script qui (non duplicato in render())
         wp_localize_script('assia-rag-admin', 'AssiaRag', [
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce'    => $nonce,
@@ -62,13 +68,8 @@ class Assistente_IA_Admin_RAG {
             echo '<div class="updated"><p><strong>✓ Tutti gli embeddings sono stati cancellati.</strong> Puoi rigenerarli cliccando sul bottone qui sotto.</p></div>';
         }
 
-        $nonce = wp_create_nonce('assia_rag_nonce');
-        wp_enqueue_script('assia-rag-admin');
-        wp_localize_script('assia-rag-admin', 'AssiaRag', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => $nonce,
-        ]);
-
+        // ✅ FIX: Rimosso wp_localize_script duplicato (già fatto in maybe_enqueue_assets)
+        
         // Recupera statistiche embeddings
         $stats = self::get_embeddings_stats();
 

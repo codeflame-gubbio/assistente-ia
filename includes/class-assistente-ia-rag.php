@@ -2,7 +2,9 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
- * RAG AVANZATO v5.4.1 CORRETTO:
+ * RAG AVANZATO v5.4.0 CORRETTO:
+ * ✅ FIX: Non modifica global $post (usa variabile locale)
+ * ✅ FIX: Validazione fonte nel metodo rileva_modifiche_snapshot
  * - Chunk size configurabile (opzione assia_chunk_size)
  * - Fix snapshot vuoto vs selezione contenuti
  * - Threshold applicato anche in fallback keyword
@@ -230,11 +232,12 @@ class Assistente_IA_RAG {
 
     /**
      * ✅ CORRETTO: Distingue "mai rigenerato" da "utente ha deselezionato"
+     * ✅ FIX v5.4.0: Aggiunta validazione fonte
      */
     protected static function rileva_modifiche_snapshot( array $voci_nuove ): array {
         $snapshot_old = get_option('assia_content_snapshot', []);
         
-        // ✅ FIX: Controlla se è la PRIMA VOLTA (non esiste meta flag)
+        // Controlla se è la PRIMA VOLTA (non esiste meta flag)
         $prima_rigenerazione = get_option('assia_snapshot_initialized', false);
         
         if ( empty($snapshot_old) && ! $prima_rigenerazione ) {
@@ -292,10 +295,18 @@ class Assistente_IA_RAG {
         
         $eliminati = array_diff_key( $snapshot_old, $snapshot_new );
         
+        // ✅ FIX v5.4.0: Validazione fonte
         foreach ( $eliminati as $key => $hash ) {
             $parts = explode('_', $key, 2);
             if ( count($parts) === 2 ) {
                 $fonte = $parts[0];
+                
+                // ✅ FIX: Valida fonte prima di procedere
+                if ( ! in_array($fonte, ['post', 'prodotto'], true) ) {
+                    error_log("ASSIA SNAPSHOT: Fonte non valida '{$fonte}' per chiave '{$key}' - saltato");
+                    continue;
+                }
+                
                 $id = (int)$parts[1];
                 
                 self::rimuovi_embeddings( $fonte, $id );
@@ -351,7 +362,6 @@ class Assistente_IA_RAG {
         $i   = (int)$job['indice'];
         $modello = $job['modello'];
         
-        // ✅ Usa chunk size configurabile
         $chunk_size = (int) get_option('assia_chunk_size', 1200);
 
         global $wpdb; $pref = $wpdb->prefix;
@@ -436,8 +446,7 @@ class Assistente_IA_RAG {
     }
 
     /** 
-     * ✅ CHUNKING INTELLIGENTE CON OVERLAP DI FRASI
-     * Chunk size ora configurabile
+     * CHUNKING INTELLIGENTE CON OVERLAP DI FRASI
      */
     protected static function spezza_testo_smart( string $testo, int $size = 1200 ): array {
         $overlap = (int) get_option('assia_chunk_overlap', 100);
@@ -503,7 +512,6 @@ class Assistente_IA_RAG {
         $avvio     = current_time('mysql');
         $errori    = [];
         
-        // ✅ Usa chunk size configurabile
         $chunk_size = (int) get_option('assia_chunk_size', 1200);
         
         global $wpdb; $pref = $wpdb->prefix;
@@ -587,9 +595,6 @@ class Assistente_IA_RAG {
         return $conteggio;
     }
 
-    /**
-     * ✅ CORRETTO: Applica threshold anche in fallback
-     */
     protected static function fallback_keyword( string $query, int $limite = 3, float $threshold = 0.30 ): array {
         global $wpdb;
         $q = trim( wp_strip_all_tags( $query ) );
@@ -608,7 +613,6 @@ class Assistente_IA_RAG {
         $righe = $wpdb->get_results( $wpdb->prepare( $sql, $like, $like, $limite * 2 ), ARRAY_A );
         if ( empty($righe) ) return [];
 
-        // ✅ Calcola score keyword-based (rudimentale)
         $schede_con_score = [];
         foreach( $righe as $r ){
             $id = (int)$r['ID'];
@@ -616,15 +620,13 @@ class Assistente_IA_RAG {
             $content = strtolower( $r['post_content'] );
             $q_lower = strtolower($q);
             
-            // Score: 1.0 se titolo contiene query, 0.5 se solo contenuto
             $score = 0.0;
             if ( strpos($title, $q_lower) !== false ) {
-                $score = 0.8; // Alto match titolo
+                $score = 0.8;
             } elseif ( strpos($content, $q_lower) !== false ) {
-                $score = 0.4; // Match contenuto
+                $score = 0.4;
             }
             
-            // ✅ Applica threshold
             if ( $score < $threshold ) continue;
             
             if ( $r['post_type'] === 'product' && self::woo_attivo() ){
@@ -641,12 +643,10 @@ class Assistente_IA_RAG {
             }
         }
         
-        // Ordina per score
         usort($schede_con_score, function($a, $b) {
             return $b['score'] <=> $a['score'];
         });
         
-        // Ritorna top N
         $schede_con_score = array_slice($schede_con_score, 0, $limite);
         
         error_log(sprintf(
@@ -677,22 +677,29 @@ class Assistente_IA_RAG {
         return $pulite;
     }
 
+    /**
+     * ✅ FIX v5.4.0: Non modifica global $post, usa variabile locale
+     */
     protected static function testo_da_post( int $pid ): string {
-        global $post;
-        $post_originale = $post;
-        
-        $post = get_post( $pid );
-        if ( ! $post ) {
+        // ✅ FIX: Usa variabile locale invece di modificare global
+        $post_obj = get_post( $pid );
+        if ( ! $post_obj ) {
             return '';
         }
-        
-        setup_postdata( $post );
         
         $titolo = get_the_title( $pid );
         $estratto = get_the_excerpt( $pid );
         
-        $contenuto_raw = $post->post_content;
+        $contenuto_raw = $post_obj->post_content;
+        
+        // Setup temporaneo per filtri (senza modificare global $post)
+        $GLOBALS['post'] = $post_obj;
+        setup_postdata( $post_obj );
+        
         $contenuto_renderizzato = apply_filters( 'the_content', $contenuto_raw );
+        
+        // Ripristina
+        wp_reset_postdata();
         
         $contenuto_renderizzato = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $contenuto_renderizzato);
         $contenuto_renderizzato = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $contenuto_renderizzato);
@@ -711,9 +718,6 @@ class Assistente_IA_RAG {
         $testo = preg_replace('/\d+(?:px|em|rem|%|vh|vw|pt)\b/i', '', $testo);
         
         $testo = preg_replace('/\s+/', ' ', trim($testo));
-        
-        wp_reset_postdata();
-        $post = $post_originale;
         
         $estratto = wp_strip_all_tags( $estratto );
         $estratto = html_entity_decode($estratto, ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -754,10 +758,10 @@ class Assistente_IA_RAG {
         $p = wc_get_product( $product_id );
         if ( ! $p ) return '';
 
-        global $post;
-        $post_originale = $post;
-        $post = get_post( $product_id );
-        setup_postdata( $post );
+        // ✅ FIX: Setup temporaneo senza modificare global permanentemente
+        $post_obj = get_post( $product_id );
+        $GLOBALS['post'] = $post_obj;
+        setup_postdata( $post_obj );
 
         $nome = get_the_title( $product_id );
         
@@ -780,7 +784,6 @@ class Assistente_IA_RAG {
         $desc = preg_replace('/\s+/', ' ', trim($desc));
         
         wp_reset_postdata();
-        $post = $post_originale;
         
         $prezzo = method_exists($p,'get_price') ? $p->get_price() : '';
         $valuta = function_exists('get_woocommerce_currency_symbol') ? get_woocommerce_currency_symbol() : '€';

@@ -3,19 +3,29 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Endpoint AJAX: chat, recupero cronologia, job embeddings (avvio/step/stato).
+ * ✅ FIX v5.4.0: Registrate tutte le actions mancanti (storico, ping)
  */
 class Assistente_IA_Ajax {
 
     public function __construct(){
+        // Chat e cronologia
         add_action('wp_ajax_assistente_ia_chat',[ $this,'gestisci_chat' ]);
         add_action('wp_ajax_nopriv_assistente_ia_chat',[ $this,'gestisci_chat' ]);
 
         add_action('wp_ajax_assistente_ia_recupera_chat',[ $this,'recupera_chat' ]);
         add_action('wp_ajax_nopriv_assistente_ia_recupera_chat',[ $this,'recupera_chat' ]);
 
+        // ✅ FIX: Registra action storico
+        add_action('wp_ajax_assistente_ia_storico', [ $this, 'storico' ]);
+        add_action('wp_ajax_nopriv_assistente_ia_storico', [ $this, 'storico' ]);
+
+        // Job embeddings
         add_action('wp_ajax_assia_embeddings_avvia', [ $this, 'embeddings_avvia' ] );
         add_action('wp_ajax_assia_embeddings_step',  [ $this, 'embeddings_step' ] );
         add_action('wp_ajax_assia_embeddings_stato', [ $this, 'embeddings_stato' ] );
+
+        // ✅ FIX: Registra action ping (diagnostica)
+        add_action('wp_ajax_assia_ping', [ $this, 'assia_ping' ]);
     }
 
     /** Gestione messaggio utente → prompt → risposta modello */
@@ -32,9 +42,9 @@ class Assistente_IA_Ajax {
 
         $prompt=Assistente_IA_Prompt::costruisci_prompt($id_chat,$messaggio, $post_id);
         $res=Assistente_IA_Modello_Vertex::genera_testo($prompt, [
-    'id_chat'       => $id_chat,
-    'hash_sessione' => $hash,
-]);
+            'id_chat'       => $id_chat,
+            'hash_sessione' => $hash,
+        ]);
         if(!empty($res['errore'])) wp_send_json_error(['messaggio'=>'Errore: '.$res['errore']]);
 
         $html=$this->postprocesso_risposta($res['testo']??'');
@@ -60,58 +70,101 @@ class Assistente_IA_Ajax {
         wp_send_json_success(['messaggi'=>$righe,'id_chat'=>$id_chat]);
     }
 
-  /** Avvia job embeddings (lista post) */
-public function embeddings_avvia(){
-    if ( ! current_user_can('manage_options') ) { 
-        wp_send_json_error(['msg'=>'no-cap'], 403); 
-    }
-    
-    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
-    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
-        error_log('ASSIA RAG: bad-nonce in embeddings_avvia');
-        wp_send_json_error(['msg'=>'bad-nonce'], 403);
-    }
-
-    $job = Assistente_IA_RAG::prepara_job_indicizzazione();
-    wp_send_json_success( $job );
-}
-
-/** Esegue uno step del job (batch N post) */
-public function embeddings_step(){
-    if ( ! current_user_can('manage_options') ) { 
-        wp_send_json_error(['msg'=>'no-cap'], 403); 
-    }
-    
-    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
-    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
-        error_log('ASSIA RAG: bad-nonce in embeddings_step');
-        wp_send_json_error(['msg'=>'bad-nonce'], 403);
-    }
-
-    $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
-    $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
-    if ( isset($job['errore']) ) wp_send_json_error( $job );
-    wp_send_json_success( $job );
-}
-
-   /** Stato corrente del job */
-public function embeddings_stato(){
-    if ( ! current_user_can('manage_options') ) { 
-        wp_send_json_error(['msg'=>'no-cap'], 403); 
-    }
-    
-    $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
-    if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
-        error_log('ASSIA RAG: bad-nonce in embeddings_stato');
-        wp_send_json_error(['msg'=>'bad-nonce'], 403);
+    /** ✅ FIX: Storico conversazioni (usato da frontend per riidratazione) */
+    public function storico(){
+        $hash = isset($_POST['hash_sessione']) ? sanitize_text_field( wp_unslash($_POST['hash_sessione']) ) : '';
+        $limite = isset($_POST['limite']) ? max(1, intval($_POST['limite'])) : 50;
+        
+        if ( empty($hash) ) {
+            wp_send_json_success(['messaggi'=>[]]);
+        }
+        
+        $id_chat = $this->ottieni_o_crea_chat($hash);
+        
+        global $wpdb; 
+        $pref = $wpdb->prefix;
+        $righe = $wpdb->get_results( $wpdb->prepare(
+            "SELECT ruolo AS mittente, testo, creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id_messaggio DESC LIMIT %d",
+            $id_chat, $limite
+        ), ARRAY_A );
+        
+        $righe = array_reverse( $righe ?: [] );
+        
+        $messaggi = [];
+        foreach($righe as $r){
+            $messaggi[] = [ 
+                'tipo' => $r['mittente']==='utente'?'utente':'bot', 
+                'testo' => wp_strip_all_tags( (string) $r['testo'] ), 
+                'ts' => $r['creato_il'] 
+            ];
+        }
+        
+        wp_send_json_success(['messaggi'=>$messaggi]);
     }
 
-    $job = Assistente_IA_RAG::stato_job();
-    
-    // ✅ AGGIUNTA: Restituisci sempre success=true
-    // Il frontend distinguerà tra job attivo e nessun job
-    wp_send_json_success( $job );
-}
+    /** ✅ FIX: Ping per test connessione AJAX */
+    public function assia_ping(){
+        if ( ! current_user_can('manage_options') ) {
+            wp_send_json_error(['msg'=>'no-cap'], 403);
+        }
+        
+        $n = $_REQUEST['_ajax_nonce'] ?? ($_REQUEST['nonce'] ?? '');
+        if ( ! wp_verify_nonce($n,'assia_rag_nonce') ) {
+            wp_send_json_error(['msg'=>'bad-nonce'], 403);
+        }
+        
+        wp_send_json_success(['ok'=>1,'time'=>time()]);
+    }
+
+    /** Avvia job embeddings (lista post) */
+    public function embeddings_avvia(){
+        if ( ! current_user_can('manage_options') ) { 
+            wp_send_json_error(['msg'=>'no-cap'], 403); 
+        }
+        
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: bad-nonce in embeddings_avvia');
+            wp_send_json_error(['msg'=>'bad-nonce'], 403);
+        }
+
+        $job = Assistente_IA_RAG::prepara_job_indicizzazione();
+        wp_send_json_success( $job );
+    }
+
+    /** Esegue uno step del job (batch N post) */
+    public function embeddings_step(){
+        if ( ! current_user_can('manage_options') ) { 
+            wp_send_json_error(['msg'=>'no-cap'], 403); 
+        }
+        
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: bad-nonce in embeddings_step');
+            wp_send_json_error(['msg'=>'bad-nonce'], 403);
+        }
+
+        $batch = isset($_POST['batch']) ? max(1, (int)$_POST['batch']) : 5;
+        $job = Assistente_IA_RAG::esegui_job_passaggio( $batch );
+        if ( isset($job['errore']) ) wp_send_json_error( $job );
+        wp_send_json_success( $job );
+    }
+
+    /** Stato corrente del job */
+    public function embeddings_stato(){
+        if ( ! current_user_can('manage_options') ) { 
+            wp_send_json_error(['msg'=>'no-cap'], 403); 
+        }
+        
+        $nonce = isset($_REQUEST['_ajax_nonce']) ? $_REQUEST['_ajax_nonce'] : ( $_REQUEST['nonce'] ?? '' );
+        if ( ! wp_verify_nonce( $nonce, 'assia_rag_nonce' ) ) {
+            error_log('ASSIA RAG: bad-nonce in embeddings_stato');
+            wp_send_json_error(['msg'=>'bad-nonce'], 403);
+        }
+
+        $job = Assistente_IA_RAG::stato_job();
+        wp_send_json_success( $job );
+    }
 
     /** Helpers persistenza chat */
     protected function ottieni_o_crea_chat(string $hash): int {
@@ -164,30 +217,4 @@ public function embeddings_stato(){
 
         return $out;
     }
-
-    public function storico(){
-        $hash = isset($_POST['hash_sessione']) ? sanitize_text_field( wp_unslash($_POST['hash_sessione']) ) : '';
-        $limite = isset($_POST['limite']) ? max(1, intval($_POST['limite'])) : 50;
-        if ( empty($hash) ) wp_send_json_success(['messaggi'=>[]]);
-        $id_chat = $this->ottieni_o_crea_chat($hash);
-        global $wpdb; $pref = $wpdb->prefix;
-        $righe = $wpdb->get_results( $wpdb->prepare(
-            "SELECT mittente, testo, creato_il FROM {$pref}assistente_ia_messaggi WHERE id_chat=%d ORDER BY id DESC LIMIT %d",
-            $id_chat, $limite
-        ), ARRAY_A );
-        $righe = array_reverse( $righe ?: [] );
-        $messaggi = [];
-        foreach($righe as $r){
-            $messaggi[] = [ 'tipo' => $r['mittente']==='utente'?'utente':'bot', 'testo' => wp_strip_all_tags( (string) $r['testo'] ), 'ts' => $r['creato_il'] ];
-        }
-        wp_send_json_success(['messaggi'=>$messaggi]);
-    }
-
-public function assia_ping(){
-    if ( ! current_user_can('manage_options') ) wp_send_json_error(['msg'=>'no-cap'],403);
-    $n = $_REQUEST['_ajax_nonce'] ?? ($_REQUEST['nonce'] ?? '');
-    if ( ! wp_verify_nonce($n,'assia_rag_nonce') ) wp_send_json_error(['msg'=>'bad-nonce'],403);
-    wp_send_json_success(['ok'=>1,'time'=>time()]);
-}
-
 }

@@ -3,7 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Widget chat front-end + shortcode [assistente_ia]
- * VERSIONE CORRETTA v5.4.1: Boolean standardizzato ('si'/'no')
+ * ✅ FIX v5.4.0: Aggiunta variabile 'hash' a wp_localize_script
  */
 class Assistente_IA_Frontend {
     private static $rendered = false;
@@ -11,7 +11,6 @@ class Assistente_IA_Frontend {
     public function __construct(){
         add_action('wp_enqueue_scripts',[ $this,'carica' ]);
         
-        // ✅ CORRETTO: Usa 'si' invece di '1'
         if ( 'si' === get_option('assia_inserimento_automatico_footer','si') ) { 
             add_action('wp_footer',[ $this,'render' ]); 
         }
@@ -23,9 +22,14 @@ class Assistente_IA_Frontend {
     public function carica(){
         wp_enqueue_style('assia-css', ASSIA_URL.'public/css/assistente-ia.css',[],ASSIA_VERSIONE);
         wp_enqueue_script('assia-js', ASSIA_URL.'public/js/assistente-ia.js',['jquery'],ASSIA_VERSIONE,true);
+        
+        // ✅ FIX: Genera hash sessione lato server (opzionale) o lascia vuoto per gestione JS
+        $hash_sessione = ''; // Il JS genera/recupera da localStorage
+        
         wp_localize_script('assia-js','AssistenteIA',[
             'ajax_url'=>admin_url('admin-ajax.php'),
             'nonce'=>wp_create_nonce('assistente_ia_nonce'),
+            'hash'=>$hash_sessione, // ✅ FIX: Aggiunta variabile hash
             'currentPost'=>function_exists('get_queried_object_id')?(int)get_queried_object_id():0,
             'messaggi_ui'=>(int)get_option('assia_messaggi_ui',30),
             'etichetta_bottone'=>get_option('assia_bottone_testo','Chatta con noi'),
