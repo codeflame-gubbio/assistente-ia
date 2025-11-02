@@ -3,7 +3,12 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Pannello impostazioni + Diagnostica + Diagnostica Modello + Archivio conversazioni.
- * VERSIONE CON SNAPSHOT HASHATO + CHUNKING OVERLAP + MODALITÀ RECUPERO
+ * VERSIONE CORRETTA v5.4.1:
+ * - Validazione/sanitizzazione completa input
+ * - Chunk size configurabile
+ * - Pulizia automatica conversazioni vecchie
+ * - Boolean standardizzati (si/no)
+ * - Rimossa opzione zombie assia_embeddings_solo_migliori
  */
 class Assistente_IA_Admin {
 
@@ -14,34 +19,40 @@ class Assistente_IA_Admin {
     
         add_action('add_meta_boxes', [ $this, 'aggiungi_meta_box_contesto' ]);
         add_action('save_post', [ $this, 'salva_meta_box_contesto' ]);
+        
+        // CRON per pulizia conversazioni vecchie
+        if ( ! wp_next_scheduled( 'assia_cleanup_old_chats' ) ) {
+            wp_schedule_event( time(), 'daily', 'assia_cleanup_old_chats' );
+        }
+        add_action( 'assia_cleanup_old_chats', [ $this, 'pulisci_conversazioni_vecchie' ] );
     }
 
-public function aggiungi_menu(){
-    add_menu_page(
-        'Assistente IA', 'Assistente IA', 'manage_options', 'assia',
-        [ $this, 'pagina_impostazioni' ], 'dashicons-format-chat', 58
-    );
+    public function aggiungi_menu(){
+        add_menu_page(
+            'Assistente IA', 'Assistente IA', 'manage_options', 'assia',
+            [ $this, 'pagina_impostazioni' ], 'dashicons-format-chat', 58
+        );
 
-    add_submenu_page(
-        'assia', 'Impostazioni', 'Impostazioni', 'manage_options', 'assia',
-        [ $this, 'pagina_impostazioni' ]
-    );
+        add_submenu_page(
+            'assia', 'Impostazioni', 'Impostazioni', 'manage_options', 'assia',
+            [ $this, 'pagina_impostazioni' ]
+        );
 
-    add_submenu_page(
-        'assia', 'Diagnostica', 'Diagnostica', 'manage_options', 'assia-diagnostica',
-        [ $this, 'pagina_diagnostica' ]
-    );
+        add_submenu_page(
+            'assia', 'Diagnostica', 'Diagnostica', 'manage_options', 'assia-diagnostica',
+            [ $this, 'pagina_diagnostica' ]
+        );
 
-    add_submenu_page(
-        'assia', 'Diagnostica Modello', 'Diagnostica Modello', 'manage_options', 'assia-diagnostica-modello',
-        [ $this, 'pagina_diagnostica_modello' ]
-    );
+        add_submenu_page(
+            'assia', 'Diagnostica Modello', 'Diagnostica Modello', 'manage_options', 'assia-diagnostica-modello',
+            [ $this, 'pagina_diagnostica_modello' ]
+        );
 
-    add_submenu_page(
-        'assia', 'Archivio conversazioni', 'Archivio conversazioni', 'manage_options', 'assia-archivio',
-        [ $this, 'pagina_archivio' ]
-    );
-}
+        add_submenu_page(
+            'assia', 'Archivio conversazioni', 'Archivio conversazioni', 'manage_options', 'assia-archivio',
+            [ $this, 'pagina_archivio' ]
+        );
+    }
 
     public function registra_impostazioni(){
         $opts = array(
@@ -61,7 +72,6 @@ public function aggiungi_menu(){
             'assia_attiva_embeddings',
             'assia_embeddings_top_k',
             'assia_embeddings_threshold',
-            'assia_embeddings_solo_migliori',
             'assia_turni_modello',
             'assia_messaggi_ui',
             'assia_ttl_giorni',
@@ -74,17 +84,134 @@ public function aggiungi_menu(){
             'assia_inserimento_automatico_footer',
             'assia_context_wc',
             'assia_context_brief_enable',
-            'assia_registro_modello_max',
             'assia_registro_modello_retention_giorni',
-            // ✅ NUOVE OPZIONI
-            'assia_rag_mode',              // 'best-1' o 'top-k'
-            'assia_chunk_overlap',         // Overlap in parole (default: 100)
-            'assia_auto_regenerate_hash',  // 'si' o 'no'
+            'assia_rag_mode',
+            'assia_chunk_overlap',
+            'assia_chunk_size', // ✅ NUOVO
+            'assia_auto_regenerate_hash',
         );
-        foreach($opts as $o){ register_setting('assia_opt', $o); }
+        
+        foreach($opts as $o){ 
+            register_setting('assia_opt', $o, [
+                'sanitize_callback' => [ $this, 'sanitize_option' ]
+            ]); 
+        }
     }
 
-public function carica_script_admin( $hook ){
+    /**
+     * ✅ NUOVA FUNZIONE: Sanitizzazione/validazione completa
+     */
+    public function sanitize_option( $value ) {
+        $option = isset($_POST['option_page']) ? $_POST['option_page'] : '';
+        
+        // Identifica quale opzione stiamo sanitizzando
+        foreach ( $_POST as $key => $val ) {
+            if ( strpos($key, 'assia_') === 0 && $val === $value ) {
+                return $this->sanitize_by_type( $key, $value );
+            }
+        }
+        
+        return $value;
+    }
+    
+    protected function sanitize_by_type( $option_name, $value ) {
+        // Float (0-1)
+        $float_options = ['assia_temperature', 'assia_top_p', 'assia_embeddings_threshold'];
+        if ( in_array($option_name, $float_options) ) {
+            $val = floatval($value);
+            return max(0.0, min(1.0, $val));
+        }
+        
+        // Integer positivi
+        $int_options = [
+            'assia_top_k', 'assia_max_token', 'assia_embeddings_top_k', 
+            'assia_turni_modello', 'assia_messaggi_ui', 'assia_ttl_giorni',
+            'assia_rate_limite_max', 'assia_rate_limite_finestra_sec',
+            'assia_chunk_overlap', 'assia_chunk_size', 'assia_registro_modello_retention_giorni'
+        ];
+        if ( in_array($option_name, $int_options) ) {
+            return max(0, intval($value));
+        }
+        
+        // Enum si/no
+        $bool_options = [
+            'assia_attiva_google_search', 'assia_attiva_embeddings',
+            'assia_registro_modello_attivo', 'assia_inserimento_automatico_footer',
+            'assia_context_wc', 'assia_context_brief_enable', 'assia_auto_regenerate_hash'
+        ];
+        if ( in_array($option_name, $bool_options) ) {
+            // Accetta anche '1'/'0' e converte in 'si'/'no'
+            if ( $value === '1' || $value === 1 || $value === true ) return 'si';
+            if ( $value === '0' || $value === 0 || $value === false ) return 'no';
+            return in_array($value, ['si', 'no']) ? $value : 'no';
+        }
+        
+        // Enum posizione
+        if ( $option_name === 'assia_bottone_posizione' ) {
+            return in_array($value, ['bottom-right', 'bottom-left']) ? $value : 'bottom-right';
+        }
+        
+        // Enum RAG mode
+        if ( $option_name === 'assia_rag_mode' ) {
+            return in_array($value, ['best-1', 'top-k']) ? $value : 'top-k';
+        }
+        
+        // Array (safety)
+        if ( $option_name === 'assia_safety_soglie' && is_array($value) ) {
+            $allowed = ['BLOCK_NONE', 'BLOCK_ONLY_HIGH', 'BLOCK_MEDIUM_AND_ABOVE', 'BLOCK_LOW_AND_ABOVE'];
+            foreach ( $value as $k => $v ) {
+                if ( ! in_array($v, $allowed) ) {
+                    $value[$k] = 'BLOCK_NONE';
+                }
+            }
+            return $value;
+        }
+        
+        // Text/textarea (sanitize)
+        if ( in_array($option_name, ['assia_obiettivo', 'assia_avviso', 'assia_ruolo_sistema']) ) {
+            return wp_kses_post($value);
+        }
+        
+        // Default: sanitize_text_field
+        return is_string($value) ? sanitize_text_field($value) : $value;
+    }
+
+    /**
+     * ✅ NUOVA FUNZIONE: Pulizia automatica conversazioni vecchie
+     */
+    public function pulisci_conversazioni_vecchie() {
+        $ttl_giorni = (int) get_option('assia_ttl_giorni', 30);
+        if ( $ttl_giorni <= 0 ) return; // Disabilitato
+        
+        global $wpdb;
+        $pref = $wpdb->prefix;
+        $data_limite = date('Y-m-d H:i:s', strtotime("-{$ttl_giorni} days"));
+        
+        // Recupera ID chat vecchie
+        $chat_ids = $wpdb->get_col( $wpdb->prepare(
+            "SELECT id_chat FROM {$pref}assistente_ia_chat WHERE ultimo_aggiornamento < %s",
+            $data_limite
+        ));
+        
+        if ( empty($chat_ids) ) return;
+        
+        // Elimina messaggi
+        $placeholders = implode(',', array_fill(0, count($chat_ids), '%d'));
+        $wpdb->query( $wpdb->prepare(
+            "DELETE FROM {$pref}assistente_ia_messaggi WHERE id_chat IN ($placeholders)",
+            ...$chat_ids
+        ));
+        
+        // Elimina chat
+        $wpdb->query( $wpdb->prepare(
+            "DELETE FROM {$pref}assistente_ia_chat WHERE id_chat IN ($placeholders)",
+            ...$chat_ids
+        ));
+        
+        error_log("ASSIA: Pulite " . count($chat_ids) . " conversazioni più vecchie di {$ttl_giorni} giorni");
+    }
+
+    public function carica_script_admin( $hook ){
         if ( isset($_GET['page']) && $_GET['page'] === 'assia-diagnostica' ) {
             wp_enqueue_script('assia-admin-js', ASSIA_URL.'public/js/assia-admin.js', ['jquery'], ASSIA_VERSIONE, true );
             wp_localize_script('assia-admin-js', 'AssistenteIAAdmin', [
@@ -132,10 +259,10 @@ public function carica_script_admin( $hook ){
 
         <h2>Generazione & Sicurezza</h2>
         <table class="form-table">
-            <tr><th>Temperature</th><td><input type="number" step="0.01" name="assia_temperature" value="<?php echo esc_attr(get_option('assia_temperature')); ?>"></td></tr>
-            <tr><th>maxOutputTokens</th><td><input type="number" name="assia_max_token" value="<?php echo esc_attr(get_option('assia_max_token')); ?>"></td></tr>
-            <tr><th>topP</th><td><input type="number" step="0.01" name="assia_top_p" value="<?php echo esc_attr(get_option('assia_top_p')); ?>"></td></tr>
-            <tr><th>topK</th><td><input type="number" name="assia_top_k" value="<?php echo esc_attr(get_option('assia_top_k')); ?>"></td></tr>
+            <tr><th>Temperature</th><td><input type="number" step="0.01" min="0" max="1" name="assia_temperature" value="<?php echo esc_attr(get_option('assia_temperature')); ?>"> <em>(0-1)</em></td></tr>
+            <tr><th>maxOutputTokens</th><td><input type="number" min="1" name="assia_max_token" value="<?php echo esc_attr(get_option('assia_max_token')); ?>"></td></tr>
+            <tr><th>topP</th><td><input type="number" step="0.01" min="0" max="1" name="assia_top_p" value="<?php echo esc_attr(get_option('assia_top_p')); ?>"> <em>(0-1)</em></td></tr>
+            <tr><th>topK</th><td><input type="number" min="1" name="assia_top_k" value="<?php echo esc_attr(get_option('assia_top_k')); ?>"></td></tr>
             <tr><th>Safety</th><td>
                 <?php $ss=(array)get_option('assia_safety_soglie'); 
                 $cats=['sexually_explicit','hate_speech','harassment','dangerous_content'];
@@ -158,7 +285,6 @@ public function carica_script_admin( $hook ){
                 </select>
             </td></tr>
             
-            <!-- ✅ NUOVA OPZIONE: Modalità recupero -->
             <tr>
                 <th>Modalità recupero</th>
                 <td>
@@ -179,11 +305,21 @@ public function carica_script_admin( $hook ){
             </td></tr>
             
             <tr><th>Threshold similarità minima</th><td>
-                <input type="number" step="0.01" name="assia_embeddings_threshold" value="<?php echo esc_attr(get_option('assia_embeddings_threshold','0.30')); ?>" min="0" max="1">
+                <input type="number" step="0.01" min="0" max="1" name="assia_embeddings_threshold" value="<?php echo esc_attr(get_option('assia_embeddings_threshold','0.30')); ?>">
                 <p class="description">Score minimo per considerare un chunk rilevante (0.30 consigliato). Valori più alti = più selettivo.</p>
             </td></tr>
             
-            <!-- ✅ NUOVA OPZIONE: Overlap chunking -->
+            <tr>
+                <th>Chunk size (caratteri)</th>
+                <td>
+                    <input type="number" name="assia_chunk_size" value="<?php echo esc_attr(get_option('assia_chunk_size',1200)); ?>" min="500" max="3000">
+                    <p class="description">
+                        Dimensione massima di ogni chunk in caratteri (default: 1200).<br>
+                        Valori più alti = più contesto ma meno chunk. Valori più bassi = più chunk ma meno contesto.
+                    </p>
+                </td>
+            </tr>
+            
             <tr>
                 <th>Overlap chunking (parole)</th>
                 <td>
@@ -196,7 +332,6 @@ public function carica_script_admin( $hook ){
                 </td>
             </tr>
             
-            <!-- ✅ NUOVA OPZIONE: Auto-rigenerazione -->
             <tr>
                 <th>Rigenerazione intelligente</th>
                 <td>
@@ -212,6 +347,30 @@ public function carica_script_admin( $hook ){
             </tr>
         </table>
 
+        <h2>Conversazioni</h2>
+        <table class="form-table">
+            <tr><th>Turni modello (contesto)</th><td>
+                <input type="number" name="assia_turni_modello" value="<?php echo esc_attr(get_option('assia_turni_modello',8)); ?>" min="1" max="50">
+                <p class="description">Numero di messaggi recenti da includere nel contesto (default: 8)</p>
+            </td></tr>
+            <tr><th>Messaggi UI (frontend)</th><td>
+                <input type="number" name="assia_messaggi_ui" value="<?php echo esc_attr(get_option('assia_messaggi_ui',30)); ?>" min="1" max="100">
+                <p class="description">Numero di messaggi da mostrare nell'interfaccia chat (default: 30)</p>
+            </td></tr>
+            <tr><th>Pulizia automatica conversazioni</th><td>
+                <input type="number" name="assia_ttl_giorni" value="<?php echo esc_attr(get_option('assia_ttl_giorni',30)); ?>" min="0" max="365">
+                <p class="description">Elimina conversazioni più vecchie di N giorni (0 = mai, default: 30). Eseguito giornalmente via CRON.</p>
+            </td></tr>
+            <tr><th>Rate limit massimo</th><td>
+                <input type="number" name="assia_rate_limite_max" value="<?php echo esc_attr(get_option('assia_rate_limite_max',8)); ?>" min="1">
+                <p class="description">Numero massimo di messaggi per finestra temporale</p>
+            </td></tr>
+            <tr><th>Rate limit finestra (secondi)</th><td>
+                <input type="number" name="assia_rate_limite_finestra_sec" value="<?php echo esc_attr(get_option('assia_rate_limite_finestra_sec',60)); ?>" min="10">
+                <p class="description">Durata della finestra in secondi (default: 60)</p>
+            </td></tr>
+        </table>
+
         <h2>Widget chat</h2>
         <table class="form-table">
             <tr><th>Titolo bottone flottante</th><td><input name="assia_bottone_testo" class="regular-text" value="<?php echo esc_attr(get_option('assia_bottone_testo','Chatta con noi')); ?>"></td></tr>
@@ -221,10 +380,10 @@ public function carica_script_admin( $hook ){
                     <option value="bottom-left" <?php selected(get_option('assia_bottone_posizione'),'bottom-left');?>>In basso a sinistra</option>
                 </select>
             </td></tr>
-        <tr><th>Inserimento automatico nel footer</th><td>
+            <tr><th>Inserimento automatico nel footer</th><td>
                 <select name="assia_inserimento_automatico_footer">
-                    <option value="1" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'1'); ?>>Sì (predefinito)</option>
-                    <option value="0" <?php selected(get_option('assia_inserimento_automatico_footer','1'),'0'); ?>>No (usa solo shortcode)</option>
+                    <option value="si" <?php selected(get_option('assia_inserimento_automatico_footer','si'),'si'); ?>>Sì (predefinito)</option>
+                    <option value="no" <?php selected(get_option('assia_inserimento_automatico_footer','si'),'no'); ?>>No (usa solo shortcode)</option>
                 </select>
             </td></tr>
         </table>
@@ -255,6 +414,10 @@ public function carica_script_admin( $hook ){
                     <option value="si" <?php selected(get_option('assia_registro_modello_attivo'),'si');?>>Sì</option>
                 </select>
                 <p class="description">Se attivo, ogni richiesta/risposta al modello viene registrata in una tabella dedicata. Consulta "Diagnostica Modello".</p>
+            </td></tr>
+            <tr><th>Conserva log per N giorni</th><td>
+                <input type="number" name="assia_registro_modello_retention_giorni" value="<?php echo esc_attr(get_option('assia_registro_modello_retention_giorni',7)); ?>" min="1" max="90">
+                <p class="description">Elimina automaticamente log più vecchi di N giorni (default: 7)</p>
             </td></tr>
         </table>
 
@@ -307,7 +470,7 @@ public function carica_script_admin( $hook ){
                             <td><?php echo esc_html($r['avviato_il'] ?? ''); ?></td>
                             <td><?php echo esc_html($r['completato_il'] ?? ''); ?></td>
                             <td><?php echo esc_html($r['modello'] ?? ''); ?></td>
-                            <td><?php echo esc_html($r['tot_post'] ?? '0'); ?></td>
+                            <td><?php echo esc_html($r['tot_voci'] ?? '0'); ?></td>
                             <td><?php echo esc_html($r['chunks_creati'] ?? '0'); ?></td>
                             <td><?php echo esc_html( is_array($r['errori'] ?? []) ? implode('; ',$r['errori']) : '' ); ?></td>
                         </tr>
@@ -430,7 +593,8 @@ public function carica_script_admin( $hook ){
             if ($ok2 === false){ $wpdb->query("DELETE FROM {$pref}assistente_ia_chat"); }
             echo '<div class="updated"><p>Archivio conversazioni svuotato.</p></div>';
         }
-global $wpdb; $pref=$wpdb->prefix;
+        
+        global $wpdb; $pref=$wpdb->prefix;
 
         // Vista dettaglio chat
         if ( isset($_GET['chat']) ){
@@ -481,10 +645,10 @@ global $wpdb; $pref=$wpdb->prefix;
         ?>
         <div class="wrap">
             <h1>Archivio conversazioni</h1>
-        <form method="post" style="margin:12px 0 18px 0;" onsubmit="return confirm('Confermi di svuotare tutte le conversazioni? Questa azione è irreversibile.');">
-            <?php wp_nonce_field('assia_svuota_archivio'); ?>
-            <button type="submit" name="assia_svuota_archivio" class="button button-danger" style="background:#dc2626;border-color:#dc2626;color:#fff;">Svuota archivio conversazioni</button>
-        </form>
+            <form method="post" style="margin:12px 0 18px 0;" onsubmit="return confirm('Confermi di svuotare tutte le conversazioni? Questa azione è irreversibile.');">
+                <?php wp_nonce_field('assia_svuota_archivio'); ?>
+                <button type="submit" name="assia_svuota_archivio" class="button button-danger" style="background:#dc2626;border-color:#dc2626;color:#fff;">Svuota archivio conversazioni</button>
+            </form>
             <?php if ($righe): ?>
                 <table class="widefat striped">
                     <thead><tr><th>ID</th><th>Hash sessione</th><th>Creato</th><th>Ultimo agg.</th><th># messaggi</th><th>Azione</th></tr></thead>
@@ -601,7 +765,8 @@ global $wpdb; $pref=$wpdb->prefix;
         $res['stale_lista'] = $stale;
         return $res;
     }
-/** Meta-box: Contesto specifico della pagina (mini-brief) */
+
+    /** Meta-box: Contesto specifico della pagina (mini-brief) */
     public function aggiungi_meta_box_contesto(){
         if ( 'no' === get_option('assia_context_brief_enable','si') ) { return; }
         $screens = apply_filters('assia_context_brief_screens', ['post','page','product']);

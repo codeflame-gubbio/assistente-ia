@@ -3,13 +3,19 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Widget chat front-end + shortcode [assistente_ia]
+ * VERSIONE CORRETTA v5.4.1: Boolean standardizzato ('si'/'no')
  */
 class Assistente_IA_Frontend {
     private static $rendered = false;
 
     public function __construct(){
         add_action('wp_enqueue_scripts',[ $this,'carica' ]);
-        if ( '1' === get_option('assia_inserimento_automatico_footer','1') ) { add_action('wp_footer',[ $this,'render' ]); }
+        
+        // ✅ CORRETTO: Usa 'si' invece di '1'
+        if ( 'si' === get_option('assia_inserimento_automatico_footer','si') ) { 
+            add_action('wp_footer',[ $this,'render' ]); 
+        }
+        
         add_shortcode('assistente_ia',[ $this,'shortcode' ]);
     }
 

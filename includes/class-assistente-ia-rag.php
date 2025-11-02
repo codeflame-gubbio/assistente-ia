@@ -2,11 +2,13 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
- * RAG AVANZATO con:
+ * RAG AVANZATO v5.4.1 CORRETTO:
+ * - Chunk size configurabile (opzione assia_chunk_size)
+ * - Fix snapshot vuoto vs selezione contenuti
+ * - Threshold applicato anche in fallback keyword
  * - Sistema snapshot hashato completo
  * - Chunking intelligente con overlap di frasi
  * - Modalità recupero BEST-1 vs TOP-K
- * - Chunk size aumentato a 1200 caratteri per maggiore contesto
  */
 class Assistente_IA_RAG {
 
@@ -19,7 +21,7 @@ class Assistente_IA_RAG {
         $threshold = (float) get_option('assia_embeddings_threshold', 0.30);
         
         if ( 'si' !== get_option('assia_attiva_embeddings','si') ) {
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
+            $schede = self::fallback_keyword( $domanda, max(1,$k), $threshold );
             return self::schede_to_contesto( $schede );
         }
 
@@ -31,7 +33,7 @@ class Assistente_IA_RAG {
         );
         
         if ( empty($emb['vettore']) ) {
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
+            $schede = self::fallback_keyword( $domanda, max(1,$k), $threshold );
             return self::schede_to_contesto( $schede );
         }
         
@@ -87,7 +89,7 @@ class Assistente_IA_RAG {
             ));
         }
         
-        // ✅ APPLICA MODALITÀ: BEST-1 vs TOP-K
+        // APPLICA MODALITÀ: BEST-1 vs TOP-K
         if ( $mode === 'best-1' ) {
             $punteggi_filtrati = array_slice( $punteggi_filtrati, 0, 1 );
         } else {
@@ -108,7 +110,6 @@ class Assistente_IA_RAG {
             
             $fonte_header = self::get_chunk_header($p['fonte'], $p['id_riferimento']);
             
-            // ✅ Aumentato limite a 1500 caratteri per chunk più completi
             $chunk_formattato = $fonte_header . "\n" . 
                                Assistente_IA_Utilita::tronca($testo_pulito, 1500);
             
@@ -126,7 +127,7 @@ class Assistente_IA_RAG {
                 $best_score
             ));
             
-            $schede = self::fallback_keyword( $domanda, max(1,$k) );
+            $schede = self::fallback_keyword( $domanda, max(1,$k), $threshold );
             $estratti_fb = self::schede_to_array( $schede );
             
             $estratti_combined = array_values( 
@@ -227,27 +228,42 @@ class Assistente_IA_RAG {
         return $job;
     }
 
+    /**
+     * ✅ CORRETTO: Distingue "mai rigenerato" da "utente ha deselezionato"
+     */
     protected static function rileva_modifiche_snapshot( array $voci_nuove ): array {
         $snapshot_old = get_option('assia_content_snapshot', []);
-
-  // ✅ FIX: Se lo snapshot è vuoto, rigenera tutto
-    if ( empty($snapshot_old) ) {
-        error_log('ASSIA SNAPSHOT: Snapshot vuoto, rigenerazione completa');
-        $snapshot_new = [];
-        foreach ( $voci_nuove as $v ) {
-            $key = $v['fonte'] . '_' . $v['id'];
-            $testo = ( $v['fonte'] === 'prodotto' )
-                ? self::costruisci_testo_prodotto( $v['id'] )
-                : self::testo_da_post( $v['id'] );
-            if ( ! $testo ) continue;
-            $snapshot_new[$key] = md5( $testo );
+        
+        // ✅ FIX: Controlla se è la PRIMA VOLTA (non esiste meta flag)
+        $prima_rigenerazione = get_option('assia_snapshot_initialized', false);
+        
+        if ( empty($snapshot_old) && ! $prima_rigenerazione ) {
+            // Prima rigenerazione EVER: rigenera tutto e marca come inizializzato
+            error_log('ASSIA SNAPSHOT: Prima rigenerazione, indicizzazione completa');
+            
+            $snapshot_new = [];
+            foreach ( $voci_nuove as $v ) {
+                $key = $v['fonte'] . '_' . $v['id'];
+                $testo = ( $v['fonte'] === 'prodotto' )
+                    ? self::costruisci_testo_prodotto( $v['id'] )
+                    : self::testo_da_post( $v['id'] );
+                if ( ! $testo ) continue;
+                $snapshot_new[$key] = md5( $testo );
+            }
+            
+            update_option('assia_content_snapshot', $snapshot_new);
+            update_option('assia_snapshot_initialized', true);
+            
+            return $voci_nuove; // Ritorna TUTTO
         }
-        update_option('assia_content_snapshot', $snapshot_new);
-        return $voci_nuove; // Ritorna TUTTO per rigenerare
-    }
+        
+        if ( empty($snapshot_old) && $prima_rigenerazione ) {
+            // Snapshot vuoto MA già inizializzato = utente ha deselezionato tutto
+            error_log('ASSIA SNAPSHOT: Snapshot vuoto ma già inizializzato - rispetto selezione vuota');
+            return []; // Non rigenerare nulla
+        }
 
-
-
+        // Normale comparazione snapshot
         $snapshot_new = [];
         $da_rigenerare = [];
         
@@ -334,6 +350,9 @@ class Assistente_IA_RAG {
         $tot = (int)$job['totale'];
         $i   = (int)$job['indice'];
         $modello = $job['modello'];
+        
+        // ✅ Usa chunk size configurabile
+        $chunk_size = (int) get_option('assia_chunk_size', 1200);
 
         global $wpdb; $pref = $wpdb->prefix;
 
@@ -356,8 +375,7 @@ class Assistente_IA_RAG {
 
             if ( ! $testo ) { continue; }
 
-            // ✅ Chunk size aumentato a 1200 caratteri
-            $chunks = self::spezza_testo_smart( $testo, 1200 );
+            $chunks = self::spezza_testo_smart( $testo, $chunk_size );
             
             $indice_chunk = 0;
             foreach( $chunks as $ch ){
@@ -419,7 +437,7 @@ class Assistente_IA_RAG {
 
     /** 
      * ✅ CHUNKING INTELLIGENTE CON OVERLAP DI FRASI
-     * Default size aumentato a 1200 caratteri
+     * Chunk size ora configurabile
      */
     protected static function spezza_testo_smart( string $testo, int $size = 1200 ): array {
         $overlap = (int) get_option('assia_chunk_overlap', 100);
@@ -485,9 +503,12 @@ class Assistente_IA_RAG {
         $avvio     = current_time('mysql');
         $errori    = [];
         
+        // ✅ Usa chunk size configurabile
+        $chunk_size = (int) get_option('assia_chunk_size', 1200);
+        
         global $wpdb; $pref = $wpdb->prefix;
 
-        $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref){
+        $processa = function(string $fonte, int $pid) use (&$conteggio,&$errori,$modello,$wpdb,$pref,$chunk_size){
             if ( $pid <= 0 ) return;
 
             $wpdb->query( $wpdb->prepare(
@@ -501,7 +522,7 @@ class Assistente_IA_RAG {
 
             if ( ! $testo ) return;
 
-            $chunks = self::spezza_testo_smart( $testo, 1200 );
+            $chunks = self::spezza_testo_smart( $testo, $chunk_size );
             $indice = 0;
             
             foreach( $chunks as $ch ){
@@ -566,14 +587,17 @@ class Assistente_IA_RAG {
         return $conteggio;
     }
 
-    protected static function fallback_keyword( string $query, int $limite = 3 ): array {
+    /**
+     * ✅ CORRETTO: Applica threshold anche in fallback
+     */
+    protected static function fallback_keyword( string $query, int $limite = 3, float $threshold = 0.30 ): array {
         global $wpdb;
         $q = trim( wp_strip_all_tags( $query ) );
         if ( $q === '' ) return [];
 
         $like = '%' . $wpdb->esc_like( $q ) . '%';
         $sql = "
-            SELECT ID, post_type
+            SELECT ID, post_type, post_title, post_content
             FROM {$wpdb->posts}
             WHERE post_status='publish'
               AND post_type IN ('post','page','product')
@@ -581,20 +605,58 @@ class Assistente_IA_RAG {
             ORDER BY post_date_gmt DESC
             LIMIT %d
         ";
-        $righe = $wpdb->get_results( $wpdb->prepare( $sql, $like, $like, $limite ), ARRAY_A );
+        $righe = $wpdb->get_results( $wpdb->prepare( $sql, $like, $like, $limite * 2 ), ARRAY_A );
         if ( empty($righe) ) return [];
 
-        $schede = [];
+        // ✅ Calcola score keyword-based (rudimentale)
+        $schede_con_score = [];
         foreach( $righe as $r ){
             $id = (int)$r['ID'];
+            $title = strtolower( $r['post_title'] );
+            $content = strtolower( $r['post_content'] );
+            $q_lower = strtolower($q);
+            
+            // Score: 1.0 se titolo contiene query, 0.5 se solo contenuto
+            $score = 0.0;
+            if ( strpos($title, $q_lower) !== false ) {
+                $score = 0.8; // Alto match titolo
+            } elseif ( strpos($content, $q_lower) !== false ) {
+                $score = 0.4; // Match contenuto
+            }
+            
+            // ✅ Applica threshold
+            if ( $score < $threshold ) continue;
+            
             if ( $r['post_type'] === 'product' && self::woo_attivo() ){
                 $txt = self::costruisci_testo_prodotto( $id );
             } else {
                 $txt = self::testo_da_post( $id );
             }
-            if ( $txt ) $schede[] = $txt;
+            
+            if ( $txt ) {
+                $schede_con_score[] = [
+                    'score' => $score,
+                    'testo' => $txt
+                ];
+            }
         }
-        return $schede;
+        
+        // Ordina per score
+        usort($schede_con_score, function($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        
+        // Ritorna top N
+        $schede_con_score = array_slice($schede_con_score, 0, $limite);
+        
+        error_log(sprintf(
+            'ASSIA FALLBACK: Query "%s" trovato %d risultati (threshold %.2f)',
+            substr($query, 0, 50),
+            count($schede_con_score),
+            $threshold
+        ));
+        
+        return array_column($schede_con_score, 'testo');
     }
 
     protected static function schede_to_contesto( array $schede ): string {
