@@ -1,7 +1,7 @@
 <?php
 /**
- * NUOVA CLASSE: Gestione selezione contenuti per embeddings
- * File: includes/class-assistente-ia-content-selector.php
+ * CLASSE CORRETTA v5.4.1: Gestione selezione contenuti per embeddings
+ * FIX: Distingue "mai configurato" da "utente ha deselezionato tutto"
  */
 
 if ( ! defined('ABSPATH') ) exit;
@@ -29,9 +29,17 @@ class Assistente_IA_Content_Selector {
             wp_die( __('Non hai i permessi per accedere a questa pagina.', 'assistente-ia') );
         }
 
+        // Mostra messaggio se salvato
+        if ( isset($_GET['saved']) && $_GET['saved'] === '1' ) {
+            echo '<div class="updated"><p>✓ Selezione salvata con successo!</p></div>';
+        }
+
         // Recupera selezioni salvate
         $selected_posts = get_option('assia_selected_posts', []);
         $selected_pages = get_option('assia_selected_pages', []);
+        
+        // ✅ Verifica se è mai stato configurato
+        $ever_configured = get_option('assia_content_selector_configured', false);
 
         // Query per post e pagine
         $posts = get_posts([
@@ -76,12 +84,20 @@ class Assistente_IA_Content_Selector {
         <div class="wrap assia-content-selector-wrap">
             <h1>📝 Selezione Contenuti per RAG</h1>
 
-            <div class="assia-cs-info">
-                <strong>ℹ️ Come funziona:</strong><br>
-                Seleziona quali <strong>post e pagine</strong> vuoi includere negli embeddings per il sistema RAG. 
-                Solo i contenuti selezionati saranno indicizzati e utilizzati per rispondere alle domande.<br>
-                <strong>I prodotti WooCommerce vengono sempre inclusi automaticamente</strong> (se WooCommerce è attivo).
-            </div>
+            <?php if ( ! $ever_configured ): ?>
+                <div class="assia-warning">
+                    <strong>⚠️ Prima configurazione</strong><br>
+                    Questa è la prima volta che configuri la selezione contenuti. Per default, <strong>nessun contenuto è selezionato</strong>.<br>
+                    Seleziona i post e le pagine che vuoi indicizzare, quindi clicca "Salva Selezione".
+                </div>
+            <?php else: ?>
+                <div class="assia-cs-info">
+                    <strong>ℹ️ Come funziona:</strong><br>
+                    Seleziona quali <strong>post e pagine</strong> vuoi includere negli embeddings per il sistema RAG. 
+                    Solo i contenuti selezionati saranno indicizzati e utilizzati per rispondere alle domande.<br>
+                    <strong>I prodotti WooCommerce vengono sempre inclusi automaticamente</strong> (se WooCommerce è attivo).
+                </div>
+            <?php endif; ?>
 
             <?php
             $total_posts = count($posts);
@@ -222,20 +238,27 @@ class Assistente_IA_Content_Selector {
 
         update_option('assia_selected_posts', $selected_posts);
         update_option('assia_selected_pages', $selected_pages);
+        
+        // ✅ Marca come configurato
+        update_option('assia_content_selector_configured', true);
 
         wp_redirect( add_query_arg( ['page' => 'assia-content-selector', 'saved' => '1'], admin_url('admin.php') ) );
         exit;
     }
 
     /**
-     * Recupera gli ID dei contenuti selezionati per l'indicizzazione
+     * ✅ CORRETTO: Recupera gli ID dei contenuti selezionati per l'indicizzazione
+     * Distingue "mai configurato" da "deseleziona tutto"
      */
     public static function get_selected_content_ids(): array {
         $posts = get_option('assia_selected_posts', []);
         $pages = get_option('assia_selected_pages', []);
         
-        // Se non c'è nessuna selezione salvata, includi tutto (retrocompatibilità)
-        if ( empty($posts) && empty($pages) ) {
+        // ✅ Verifica se è mai stato configurato
+        $ever_configured = get_option('assia_content_selector_configured', false);
+        
+        // Se non è mai stato configurato, includi tutto (retrocompatibilità)
+        if ( ! $ever_configured ) {
             $all_posts = get_posts([
                 'post_type' => ['post', 'page'],
                 'post_status' => 'publish',
@@ -243,6 +266,12 @@ class Assistente_IA_Content_Selector {
                 'fields' => 'ids'
             ]);
             return $all_posts;
+        }
+        
+        // Se configurato ma array vuoti = utente ha deselezionato tutto
+        if ( empty($posts) && empty($pages) ) {
+            error_log('ASSIA CONTENT SELECTOR: Utente ha deselezionato tutti i contenuti');
+            return []; // Ritorna array vuoto (rispetta la scelta)
         }
 
         return array_merge($posts, $pages);
