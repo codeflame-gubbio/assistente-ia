@@ -1,0 +1,75 @@
+#assistente-ia-bottone{
+    position: fixed; bottom: 20px; right: 20px; z-index: 99999;
+    background:#2563eb; color:#fff; padding:12px 16px; border-radius: 999px; cursor:pointer;
+    box-shadow: 0 10px 20px rgba(0,0,0,.12);
+}
+#assistente-ia-bottone.assia-pos-bottom-left{ left:20px; right:auto; }
+#assistente-ia-bottone .assistente-ia-etichetta{ font-weight:600; }
+
+#assistente-ia-popup{
+    position: fixed; bottom: 80px; right: 20px; width: 340px; max-width: 90vw;
+    background:#fff; border-radius:16px; border:1px solid #e5e7eb;
+    box-shadow: 0 24px 48px rgba(0,0,0,.18); z-index: 99999; overflow:hidden;
+}
+#assistente-ia-popup.assia-nascosto{ display:none; }
+#assistente-ia-popup .assistente-ia-intestazione{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; background:#f3f4f6;
+}
+#assistente-ia-popup .assistente-ia-chiudi{ background:none; border:none; font-size:20px; cursor:pointer; }
+#assistente-ia-popup .assistente-ia-messaggi{ height: 320px; overflow:auto; padding: 10px; }
+#assistente-ia-popup .assistente-ia-inputarea{ display:flex; gap:6px; padding: 10px; border-top:1px solid #eee; }
+#assistente-ia-popup input#assistente-ia-input{ flex:1; padding:8px 10px; border:1px solid #ddd; border-radius:10px; }
+#assistente-ia-popup button#assistente-ia-invia{ padding:8px 12px; border:none; border-radius:10px; background:#2563eb; color:#fff; cursor:pointer; }
+
+.assia-messaggio{ padding:8px 10px; border-radius: 12px; margin:6px 0; line-height:1.45; }
+.assia-msg-utente{ background:#e0f2fe; align-self:flex-end; }
+.assia-msg-assistente{ background:#f9fafb; }
+
+.assia-preloader{ display:flex; gap:6px; padding:8px; }
+.assia-preloader .assia-pallino{
+    width:10px; height:10px; background:#9ca3af; border-radius:999px; display:inline-block;
+    animation: assia-blink 1s infinite ease-in-out;
+}
+.assia-preloader .assia-pallino:nth-child(2){ animation-delay: .15s; }
+.assia-preloader .assia-pallino:nth-child(3){ animation-delay: .30s; }
+@keyframes assia-blink{ 0%,80%,100%{ opacity:.2 } 40%{ opacity:1 } }
+
+.assia-link-card{
+    display:flex; gap:8px; align-items:center; background:#fff; border:1px solid #eee; border-radius:12px; padding:8px; margin:6px 0;
+}
+.assia-link-card img{ width:40px; height:40px; object-fit:cover; border-radius:8px; }
+.assia-link-card-testo span{ display:block; color:#6b7280; font-size:12px; }
+
+/* Patch v5.3.2: fix definitivo layout input/bottone (override temi come Divi) */
+#assistente-ia-popup, #assistente-ia-popup * { box-sizing: border-box; }
+
+#assistente-ia-popup .assistente-ia-inputarea{
+  display:flex; align-items:flex-end; gap:8px;
+  padding:10px; border-top:1px solid #eee;
+}
+
+#assistente-ia-popup #assistente-ia-input{
+  flex:1 1 auto; min-width:0; width:100%;
+  min-height:44px; max-height:160px; line-height:1.35;
+  resize:vertical; padding:10px 12px;
+  border:1px solid #ddd; border-radius:10px;
+}
+
+#assistente-ia-popup button#assistente-ia-invia{
+  position:static !important; right:auto !important; top:auto !important; bottom:auto !important; left:auto !important; transform:none !important;
+  margin:0 !important; flex:0 0 44px; width:44px; height:44px;
+  display:inline-flex; align-items:center; justify-content:center;
+  border:none; border-radius:10px; cursor:pointer;
+}
+
+@media (max-width: 420px){
+  #assistente-ia-popup{ right:10px; left:10px; width:auto; }
+}
+
+/* Patch v5.3.6.x: layout chat robust + mobile */
+#assistente-ia-popup, #assistente-ia-popup * { box-sizing: border-box; }
+#assistente-ia-popup .assistente-ia-inputarea{ display:flex; align-items:flex-end; gap:8px; padding:10px; border-top:1px solid #eee; }
+#assistente-ia-popup #assistente-ia-input{ flex:1 1 auto; min-width:0; width:100%; min-height:44px; max-height:160px; line-height:1.35; resize:vertical; padding:10px 12px; border:1px solid #ddd; border-radius:10px; }
+#assistente-ia-popup button#assistente-ia-invia{ position:static !important; right:auto !important; top:auto !important; bottom:auto !important; left:auto !important; transform:none !important; margin:0 !important; flex:0 0 44px; width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center; border:none; border-radius:10px; cursor:pointer; }
+@media (max-width:420px){ #assistente-ia-popup{ right:10px; left:10px; width:auto; } }
