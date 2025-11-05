@@ -4,140 +4,84 @@ if ( ! defined('ABSPATH') ) { exit; }
 /**
  * Renderer robusto per ottenere TESTO PULITO da un post costruito con
  * Gutenberg / Divi / Elementor / shortcodes custom, anche durante AJAX.
- * 
- * v5.9.2 - SOLUZIONE DEFINITIVA per tutti i page builder
+ *
+ * v6.0.0 - Riprogettato per la semplicità (ispirato a GeminiBot)
+ *
+ * La strategia di GeminiBot.php funziona perché si affida a WordPress
+ * per aver già caricato tutti i plugin (incluso i page builder) e
+ * registrato i loro shortcode nel contesto di admin-ajax.php.
+ *
+ * L'approccio precedente (v5.9.2) era troppo complesso:
+ * 1. Cercava di chiamare i metodi "nativi" dei builder (es. Elementor)
+ * che possono fallire in un contesto AJAX non standard.
+ * 2. Usava fallback (REST, HTTP) che sono lenti e inaffidabili.
+ *
+ * Questa versione torna alla semplicità:
+ * 1. Imposta il contesto del post (global $post, setup_postdata).
+ * 2. Applica do_blocks() per Gutenberg.
+ * 3. Applica il filtro 'the_content', che è il punto in cui
+ * Divi, Elementor, WPBakery, ecc. espandono i loro shortcode.
+ * 4. Esegue una pulizia finale.
  */
 class Assistente_IA_Renderer {
 
     /**
-     * Inizializza il renderer e forza il caricamento dei page builder in AJAX
-     * DA CHIAMARE UNA SOLA VOLTA nel plugin principale
+     * Inizializza il renderer.
+     * (Non è più necessario forzare il caricamento dei moduli builder)
      */
     public static function init() {
-        // CRITICO: Forza Divi a caricarsi anche in AJAX
-        if ( defined('ET_BUILDER_VERSION') ) {
-            add_filter( 'et_builder_load_modules', '__return_true' );
-            add_filter( 'et_builder_should_load_framework', '__return_true' );
-            
-            // Assicura che Divi sia inizializzato
-            add_action( 'init', function() {
-                if ( function_exists('et_builder_init_global_settings') ) {
-                    et_builder_init_global_settings();
-                }
-                if ( function_exists('et_builder_add_main_elements') ) {
-                    et_builder_add_main_elements();
-                }
-            }, 1 );
-        }
-        
-        // Forza Elementor in AJAX
-        if ( did_action('elementor/loaded') ) {
-            add_action( 'init', function() {
-                if ( class_exists('\Elementor\Plugin') ) {
-                    \Elementor\Plugin::instance()->init();
-                }
-            }, 1 );
-        }
+        // Non è più necessario forzare Divi o Elementor in AJAX.
+        // Ci affidiamo al caricamento standard di admin-ajax.php.
     }
 
     /**
      * Ottiene il testo pulito di un post.
      *
      * @param int  $post_id
-     * @param bool $usa_rest_fallback  Se true, prova anche /wp/v2/posts/{id}
-     * @param bool $usa_http_fallback  Ultimo fallback: GET del permalink (costoso)
      * @return string Testo plain ripulito
      */
-    public static function ottieni_testo_pulito_da_post( $post_id, $usa_rest_fallback = true, $usa_http_fallback = false ) {
-        $post = get_post( $post_id );
-        if ( ! $post || 'trash' === $post->post_status ) { 
-            return ''; 
+    public static function ottieni_testo_pulito_da_post( $post_id, $usa_rest_fallback = false, $usa_http_fallback = false ) {
+        $post_obj = get_post( $post_id );
+        
+        // Controllo base sul post
+        if ( ! $post_obj || 'publish' !== $post_obj->post_status || ! empty( $post_obj->post_password ) ) {
+            return '';
         }
 
-        // --- Setup del contesto globale (CRITICO per i page builder) ---
+        // --- Setup del contesto globale (CRITICO per molti shortcode) ---
+        // Questo è un passaggio "best practice" che GeminiBot omette, 
+        // ma che garantisce che shortcode che dipendono da `global $post` funzionino.
         global $post;
         $old_post = $post;
-        $GLOBALS['post'] = $post;
-        setup_postdata( $post );
+        $GLOBALS['post'] = $post_obj;
+        setup_postdata( $post_obj );
 
-        // --- TENTATIVO 1: percorso "nativo" del builder ---
-        $html = '';
+        // --- ESTRAZIONE (La via semplice, come GeminiBot) ---
+        $html = $post_obj->post_content;
 
-        // Elementor: renderer ufficiale front-end
-        if ( did_action( 'elementor/loaded' ) && class_exists( '\Elementor\Plugin' ) ) {
-            try {
-                $elementor = \Elementor\Plugin::$instance;
-                if ( $elementor->db->is_built_with_elementor( $post_id ) ) {
-                    $html = $elementor->frontend->get_builder_content_for_display( $post_id, true );
-                }
-            } catch ( \Throwable $e ) {
-                // continua con i fallback
-            }
+        // 1. Espandi blocchi Gutenberg
+        if ( function_exists( 'has_blocks' ) && function_exists( 'do_blocks' ) && has_blocks( $post_obj ) ) {
+            $html = do_blocks( $html );
         }
 
-        // Se non è Elementor o non ha reso nulla, prova Gutenberg + the_content
-        if ( '' === trim( $html ) ) {
-            $content = $post->post_content;
+        // 2. Applica 'the_content'
+        // Questo è il filtro chiave dove Divi, Elementor, WPBakery, etc.
+        // sostituiscono i loro shortcode [et_pb_...], [vc_...], etc.
+        // Questo è il passaggio fondamentale che usa GeminiBot.
+        $html = apply_filters( 'the_content', $html );
 
-            // Gutenberg: espandi i blocchi prima del filtro classico
-            if ( function_exists( 'has_blocks' ) && function_exists( 'do_blocks' ) && has_blocks( $post ) ) {
-                $content = do_blocks( $content );
-            }
-
-            // Filtro principale: qui entrano Divi, WPBakery, shortcode registrati su the_content
-            $html = apply_filters( 'the_content', $content );
-
-            // Se sospettiamo shortcode non processati, prova anche do_shortcode
-            if ( strpos( $html, '[et_pb_' ) !== false || 
-                 strpos( $html, '[vc_' ) !== false || 
-                 strpos( $content, '[' ) !== false ) {
-                $maybe = do_shortcode( shortcode_unautop( $content ) );
-                if ( strlen( wp_strip_all_tags( $maybe, true ) ) > strlen( wp_strip_all_tags( $html, true ) ) ) {
-                    $html = $maybe;
-                }
-            }
-        }
-
-        // --- TENTATIVO 2: REST API (spesso identico al front-end) ---
-        if ( $usa_rest_fallback && '' === trim( wp_strip_all_tags( $html, true ) ) && function_exists( 'rest_do_request' ) ) {
-            $req = new \WP_REST_Request( 'GET', '/wp/v2/posts/' . $post_id );
-            $res = rest_do_request( $req );
-            if ( $res && 200 === $res->get_status() ) {
-                $data = $res->get_data();
-                if ( isset( $data['content']['rendered'] ) ) {
-                    $html = (string) $data['content']['rendered'];
-                }
-            }
-        }
-
-        // --- TENTATIVO 3 (opzionale): GET del permalink ---
-        if ( $usa_http_fallback && '' === trim( wp_strip_all_tags( $html, true ) ) ) {
-            $permalink = get_permalink( $post_id );
-            if ( $permalink ) {
-                $r = wp_remote_get( $permalink, [
-                    'timeout'    => 20,
-                    'user-agent' => 'AssistenteIA/1.0',
-                    'headers'    => [ 'Cache-Control' => 'no-cache' ],
-                ] );
-                if ( ! is_wp_error( $r ) ) {
-                    $body = wp_remote_retrieve_body( $r );
-                    // Estrai solo il contenuto principale se presente
-                    if ( preg_match( '/<main[^>]*>(.*?)<\/main>/si', $body, $matches ) ) {
-                        $html = $matches[1];
-                    } elseif ( preg_match( '/<article[^>]*>(.*?)<\/article>/si', $body, $matches ) ) {
-                        $html = $matches[1];
-                    } else {
-                        $html = $body;
-                    }
-                }
-            }
-        }
+        // 3. Fallback: Esegui do_shortcode (sicurezza)
+        // A volte 'the_content' non esegue do_shortcode o lo fa troppo presto.
+        // Eseguirlo di nuovo assicura che gli shortcode (anche quelli
+        // registrati senza agganciarsi a 'the_content') siano processati.
+        $html = do_shortcode( shortcode_unautop( $html ) );
 
         // --- PULIZIA TESTO ---
+        // Usiamo la funzione di pulizia robusta della v5.9.2
         $testo = self::pulisci_html_in_testo( $html );
         
         // Aggiungi titolo se presente
-        $titolo = get_the_title( $post_id );
+        $titolo = get_the_title( $post_obj );
         if ( $titolo ) {
             $testo = wp_strip_all_tags( $titolo ) . '. ' . $testo;
         }
@@ -151,6 +95,7 @@ class Assistente_IA_Renderer {
     
     /**
      * Pulisce HTML e lo converte in testo plain
+     * (Questa funzione dalla v5.9.2 va bene e può essere mantenuta)
      */
     private static function pulisci_html_in_testo( $html ) {
         $html = (string) $html;
@@ -165,11 +110,11 @@ class Assistente_IA_Renderer {
         // Normalizza entità
         $html = str_replace( ']]>', ']]&gt;', $html );
 
-        // Converte in testo
+        // Converte in testo (come fa GeminiBot.php)
         $testo = wp_strip_all_tags( $html, true );
         $testo = html_entity_decode( $testo, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
         
-        // Rimuovi shortcode residui
+        // Rimuovi shortcode residui (se 'the_content' ha fallito)
         $testo = preg_replace( '/\[[^\]]*\]/', '', $testo );
         
         // Rimuovi CSS residuo
@@ -187,6 +132,7 @@ class Assistente_IA_Renderer {
 
     /**
      * Debug rapido: verifica che gli shortcode chiave siano registrati.
+     * (Questa funzione è ancora utile per la diagnostica)
      */
     public static function diagnostica_shortcodes() {
         global $shortcode_tags;
