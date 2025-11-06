@@ -22,8 +22,9 @@ public static function costruisci_prompt(int $id_chat, string $domanda, int $pos
             $tit = get_the_title($p);
             $url = get_permalink($p);
             // ✅ 500 PAROLE dalla pagina corrente
-            $estr = wp_trim_words( wp_strip_all_tags( get_the_excerpt($p) ?: $p->post_content ), 500 );
-            $contesto_pagina = "Titolo: {$tit}\nURL: {$url}\nContenuto: {$estr}";
+            // ✅ CODICE CORRETTO (usa il renderer che già funziona per gli embeddings!)
+$testo_pulito = Assistente_IA_Renderer::ottieni_testo_pulito_da_post( $post_id );
+$estr = wp_trim_words( $testo_pulito, 500 );
         }
     }
 
