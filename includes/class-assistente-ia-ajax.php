@@ -3,7 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Endpoint AJAX: chat, recupero cronologia, job embeddings.
- * ✅ FIX v5.6.1: Validazione hash sessione + verifica nonce su tutti gli endpoint pubblici
+ * ✅ FIX v6.0.2: Rimossi tag <p> per compatibilità con typewriter effect
  */
 class Assistente_IA_Ajax {
 
@@ -21,13 +21,13 @@ class Assistente_IA_Ajax {
     }
 
     /**
-     * ✅ FIX v5.6.1: Valida il formato dell'hash sessione
+     * Valida il formato dell'hash sessione
      */
     protected function valida_hash_sessione($hash): bool {
         return preg_match('/^[A-Z0-9]{12,20}$/', $hash) === 1;
     }
 
-    /** ✅ FIX v5.6.1: Validazione nonce + hash */
+    /** Gestisce chat - validazione nonce + hash */
     public function gestisci_chat(){
         if ( !isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'assistente_ia_nonce') ) {
             wp_send_json_error(['messaggio'=>'Richiesta non valida: nonce']);
@@ -50,7 +50,7 @@ class Assistente_IA_Ajax {
         wp_send_json_success(['risposta_html'=>$html,'id_chat'=>$id_chat]);
     }
 
-    /** ✅ FIX v5.6.1: Validazione nonce + hash */
+    /** Recupera chat - validazione nonce + hash */
     public function recupera_chat(){
         if ( !isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'assistente_ia_nonce') ) {
             wp_send_json_error(['messaggio'=>'Richiesta non valida: nonce']);
@@ -67,7 +67,7 @@ class Assistente_IA_Ajax {
         wp_send_json_success(['messaggi'=>$righe,'id_chat'=>$id_chat]);
     }
 
-    /** ✅ FIX v5.6.1: Validazione hash */
+    /** Storico - validazione hash */
     public function storico(){
         $hash = isset($_POST['hash_sessione']) ? sanitize_text_field( wp_unslash($_POST['hash_sessione']) ) : '';
         $limite = isset($_POST['limite']) ? max(1, intval($_POST['limite'])) : 50;
@@ -132,16 +132,29 @@ class Assistente_IA_Ajax {
         $wpdb->update($pref.'assistente_ia_chat',[ 'ultimo_aggiornamento'=>current_time('mysql') ],[ 'id_chat'=>$id_chat ]);
     }
 
-    /** ✅ FIX v5.6.1: Sanitizzazione prima della manipolazione */
+    /**
+     * ✅ v6.0.2: Typewriter migliorato gestisce correttamente HTML
+     * Ripristinati tag <p> per formattazione migliore
+     */
     protected function postprocesso_risposta(string $testo): string {
         $testo = wp_kses_post(trim($testo));
+        
+        // Converti link in tag <a>
         $testo = preg_replace_callback('#(?<!["\'>])(https?://[^\s<]+)#', function($m){
             $url = esc_url($m[1]);
             if ( empty($url) ) return esc_html($m[1]);
             return '<a href="'.esc_url($url).'" target="_blank" rel="noopener nofollow">'.esc_html($m[1]).'</a>';
         }, $testo);
-        $out=''; foreach(explode("\n",$testo) as $r){ if(trim($r)) $out.='<p>'.$r.'</p>'; }
-        $out=preg_replace_callback('#<a [^>]*href="([^"]+)"[^>]*>(.*?)</a>#',function($m){
+        
+        // Wrappa righe non vuote in <p>
+        $out=''; 
+        foreach(explode("\n",$testo) as $r){ 
+            if(trim($r)) $out.='<p>'.$r.'</p>'; 
+        }
+        $testo = $out;
+        
+        // Aggiungi link card per URL interni
+        $testo = preg_replace_callback('#<a [^>]*href="([^"]+)"[^>]*>(.*?)</a>#',function($m){
             $url=$m[1]; $txt=$m[2]; $pid=url_to_postid($url);
             if($pid){
                 $ttl=get_the_title($pid); $thumb=get_the_post_thumbnail_url($pid,'thumbnail');
@@ -151,7 +164,8 @@ class Assistente_IA_Ajax {
                 return '<a class="assia-link" href="'.esc_url($url).'" target="_blank" rel="noopener">'.$txt.'</a>'.$card;
             }
             return $m[0];
-        },$out);
-        return $out;
+        },$testo);
+        
+        return $testo;
     }
 }

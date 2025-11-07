@@ -21,31 +21,67 @@
 
     /* ============================================
        EFFETTO TYPEWRITER per messaggi AI
+       Gestisce correttamente l'HTML con animazione parola per parola
        ============================================ */
-    function assiaTypewriter(testo, elemento) {
-        let i = 0;
-        elemento.html('').addClass('assia-typing-cursor');
+    function assiaTypewriter(html, elemento) {
+        // Renderizza l'HTML nel div
+        elemento.html(html);
         
-        const velocita = 12; // millisecondi per carattere (più basso = più veloce)
-        const intervallo = setInterval(function() {
-            if (i < testo.length) {
-                // Rimuovi temporaneamente il cursore
-                elemento.removeClass('assia-typing-cursor');
+        // Trova tutti i nodi di testo all'interno
+        var testo_nodes = [];
+        function trovaTesto(node) {
+            if (node.nodeType === 3) { // Text node
+                if (node.nodeValue.trim()) {
+                    testo_nodes.push(node);
+                }
+            } else {
+                $(node).contents().each(function() {
+                    trovaTesto(this);
+                });
+            }
+        }
+        trovaTesto(elemento[0]);
+        
+        // Nascondi tutto il testo inizialmente
+        testo_nodes.forEach(function(node) {
+            node.originalText = node.nodeValue;
+            node.nodeValue = '';
+        });
+        
+        // Anima il testo parola per parola
+        var currentNodeIndex = 0;
+        var currentText = '';
+        var words = [];
+        var currentWordIndex = 0;
+        
+        if (testo_nodes.length > 0) {
+            words = testo_nodes[currentNodeIndex].originalText.split(' ');
+        }
+        
+        var velocita = 30; // millisecondi per parola
+        var intervallo = setInterval(function() {
+            if (currentNodeIndex >= testo_nodes.length) {
+                clearInterval(intervallo);
+                var container = $('.assistente-ia-messaggi');
+                container.scrollTop(container[0].scrollHeight);
+                return;
+            }
+            
+            if (currentWordIndex < words.length) {
+                currentText += (currentWordIndex > 0 ? ' ' : '') + words[currentWordIndex];
+                testo_nodes[currentNodeIndex].nodeValue = currentText;
+                currentWordIndex++;
                 
-                // Aggiungi carattere
-                elemento.html(elemento.html() + testo.charAt(i));
-                i++;
-                
-                // Rimetti il cursore
-                elemento.addClass('assia-typing-cursor');
-                
-                // Auto-scroll durante la digitazione
                 var container = $('.assistente-ia-messaggi');
                 container.scrollTop(container[0].scrollHeight);
             } else {
-                clearInterval(intervallo);
-                // Rimuovi il cursore alla fine
-                elemento.removeClass('assia-typing-cursor');
+                // Passa al nodo successivo
+                currentNodeIndex++;
+                if (currentNodeIndex < testo_nodes.length) {
+                    words = testo_nodes[currentNodeIndex].originalText.split(' ');
+                    currentWordIndex = 0;
+                    currentText = '';
+                }
             }
         }, velocita);
     }
@@ -226,7 +262,7 @@
         render_preloader();
         
         $.post(AssistenteIA.ajax_url, {
-            action:'assistente_ia_invia',
+            action:'assistente_ia_chat',
             nonce: AssistenteIA.nonce,
             messaggio: txt,
             hash_sessione: ottieni_o_crea_hash_sessione(),

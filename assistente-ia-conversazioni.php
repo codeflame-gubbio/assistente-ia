@@ -1,15 +1,15 @@
 <?php
 /**
  * Plugin Name: Assistente IA Conversazioni
- * Description: Chat con cronologia persistente, riidratazione cross-pagina, RAG con embeddings, rate limit, prompt modulare e integrazione Vertex AI. Stile interamente in italiano.
- * Version: 5.9.5
+ * Description: Chat con cronologia persistente, riidratazione cross-pagina, RAG con embeddings, rate limit, prompt modulare e integrazione Vertex AI. v6.0.2: Fix visualizzazione tag HTML con typewriter.
+ * Version: 6.0.2
  * Author: Assistente IA
  * Text Domain: assistente-ia-conversazioni
  */
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'ASSIA_VERSIONE', '5.9.5' );
+define( 'ASSIA_VERSIONE', '6.0.2' );
 define( 'ASSIA_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ASSIA_URL', plugin_dir_url( __FILE__ ) );
 

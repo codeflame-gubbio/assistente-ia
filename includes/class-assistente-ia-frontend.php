@@ -3,7 +3,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /**
  * Widget chat front-end + shortcode [assistente_ia]
- * ✅ FIX v5.4.0: Aggiunta variabile 'hash' a wp_localize_script
+ * ✅ v6.0.0: UI migliorata con popup centrale e overlay
  */
 class Assistente_IA_Frontend {
     private static $rendered = false;
@@ -23,13 +23,12 @@ class Assistente_IA_Frontend {
         wp_enqueue_style('assia-css', ASSIA_URL.'public/css/assistente-ia.css',[],ASSIA_VERSIONE);
         wp_enqueue_script('assia-js', ASSIA_URL.'public/js/assistente-ia.js',['jquery'],ASSIA_VERSIONE,true);
         
-        // ✅ FIX: Genera hash sessione lato server (opzionale) o lascia vuoto per gestione JS
         $hash_sessione = ''; // Il JS genera/recupera da localStorage
         
         wp_localize_script('assia-js','AssistenteIA',[
             'ajax_url'=>admin_url('admin-ajax.php'),
             'nonce'=>wp_create_nonce('assistente_ia_nonce'),
-            'hash'=>$hash_sessione, // ✅ FIX: Aggiunta variabile hash
+            'hash'=>$hash_sessione,
             'currentPost'=>function_exists('get_queried_object_id')?(int)get_queried_object_id():0,
             'messaggi_ui'=>(int)get_option('assia_messaggi_ui',30),
             'etichetta_bottone'=>get_option('assia_bottone_testo','Chatta con noi'),
@@ -40,8 +39,8 @@ class Assistente_IA_Frontend {
     public function render(){ if(self::$rendered) return; echo $this->html(); self::$rendered=true; }
     public function shortcode(){ self::$rendered=true; return $this->html(); }
 
-    /** HTML del widget */
- protected function html(): string {
+    /** HTML del widget - v6.0.0 con overlay e popup centrale */
+    protected function html(): string {
         $avviso = get_option('assia_avviso', '');
         ob_start(); 
         ?>
@@ -90,4 +89,4 @@ class Assistente_IA_Frontend {
         <?php 
         return ob_get_clean();
     }
-
+}
