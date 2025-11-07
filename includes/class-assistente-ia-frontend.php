@@ -41,61 +41,53 @@ class Assistente_IA_Frontend {
     public function shortcode(){ self::$rendered=true; return $this->html(); }
 
     /** HTML del widget */
-protected function html(): string {
-    $avviso = get_option('assia_avviso', '');
-    ob_start(); 
-    ?>
-    
-    <!-- ============================================
-         OVERLAY SFONDO SCURO
-         ============================================ -->
-    <div id="assistente-ia-overlay"></div>
-    
-    <!-- ============================================
-         BOTTONE FLOTTANTE
-         ============================================ -->
-    <div id="assistente-ia-bottone" class="assia-pos-<?php echo esc_attr(get_option('assia_bottone_posizione','bottom-right')); ?>">
-        <span class="assistente-ia-etichetta"><?php echo esc_html(get_option('assia_bottone_testo','Chatta con noi')); ?></span>
-    </div>
-    
-    <!-- ============================================
-         POPUP CHAT CENTRALE
-         ============================================ -->
-    <div id="assistente-ia-popup" class="assia-nascosto" role="dialog" aria-live="polite" aria-modal="true">
+ protected function html(): string {
+        $avviso = get_option('assia_avviso', '');
+        ob_start(); 
+        ?>
         
-        <!-- Header -->
-        <div class="assistente-ia-intestazione">
-            <strong>Assistente IA</strong>
-            <button type="button" class="assistente-ia-chiudi" aria-label="Chiudi chat">×</button>
+        <!-- OVERLAY SFONDO SCURO -->
+        <div id="assistente-ia-overlay"></div>
+        
+        <!-- BOTTONE FLOTTANTE -->
+        <div id="assistente-ia-bottone" class="assia-pos-<?php echo esc_attr(get_option('assia_bottone_posizione','bottom-right')); ?>">
+            <span class="assistente-ia-etichetta"><?php echo esc_html(get_option('assia_bottone_testo','Chatta con noi')); ?></span>
         </div>
         
-        <!-- Area messaggi -->
-        <div id="assistente-ia-messaggi" class="assistente-ia-messaggi" aria-live="polite">
-            <?php if ( !empty($avviso) ): ?>
-                <div class="assia-messaggio assia-msg-assistente assia-avviso-iniziale">
-                    <?php echo wp_kses_post($avviso); ?>
-                </div>
-            <?php endif; ?>
+        <!-- POPUP CHAT CENTRALE -->
+        <div id="assistente-ia-popup" class="assia-nascosto" role="dialog" aria-live="polite" aria-modal="true">
+            
+            <!-- Header -->
+            <div class="assistente-ia-intestazione">
+                <strong>Assistente IA</strong>
+                <button type="button" class="assistente-ia-chiudi" aria-label="Chiudi chat">×</button>
+            </div>
+            
+            <!-- Area messaggi -->
+            <div id="assistente-ia-messaggi" class="assistente-ia-messaggi" aria-live="polite">
+                <?php if ( !empty($avviso) ): ?>
+                    <div class="assia-messaggio assia-msg-assistente assia-avviso-iniziale">
+                        <?php echo wp_kses_post($avviso); ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+            
+            <!-- Area input -->
+            <div class="assistente-ia-inputarea">
+                <textarea id="assistente-ia-input" 
+                          rows="2" 
+                          placeholder="Scrivi un messaggio…" 
+                          aria-label="Campo di testo per scrivere il messaggio"></textarea>
+                <button id="assistente-ia-invia" 
+                        type="button" 
+                        aria-label="Invia il messaggio">
+                    ➤
+                </button>
+            </div>
+            
         </div>
         
-        <!-- Area input -->
-        <div class="assistente-ia-inputarea">
-            <textarea id="assistente-ia-input" 
-                      rows="2" 
-                      placeholder="Scrivi un messaggio…" 
-                      aria-label="Campo di testo per scrivere il messaggio"></textarea>
-            <button id="assistente-ia-invia" 
-                    type="button" 
-                    aria-label="Invia il messaggio">
-                ➤
-            </button>
-        </div>
-        
-    </div>
-    
-    <?php 
-    return ob_get_clean();
-}
-
-?>
+        <?php 
+        return ob_get_clean();
+    }
 
