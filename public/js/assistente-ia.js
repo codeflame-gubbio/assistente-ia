@@ -1,8 +1,10 @@
 (function($){
     'use strict';
 
-    // ✅ FIX v5.6.1: Tutte le funzioni dentro il closure + migliore gestione errori
-    // ✅ FIX v5.6.1: Aggiunto throttling per prevenire invii multipli
+    /* ============================================
+       ASSISTENTE IA - JAVASCRIPT MIGLIORATO v2.0
+       Con effetto typewriter e gestione overlay
+       ============================================ */
 
     // Variabile per throttling
     var invioInCorso = false;
@@ -17,11 +19,55 @@
         return h;
     }
 
-    function appendi_messaggio(ruolo, html){
+    /* ============================================
+       EFFETTO TYPEWRITER per messaggi AI
+       ============================================ */
+    function assiaTypewriter(testo, elemento) {
+        let i = 0;
+        elemento.html('').addClass('assia-typing-cursor');
+        
+        const velocita = 12; // millisecondi per carattere (più basso = più veloce)
+        const intervallo = setInterval(function() {
+            if (i < testo.length) {
+                // Rimuovi temporaneamente il cursore
+                elemento.removeClass('assia-typing-cursor');
+                
+                // Aggiungi carattere
+                elemento.html(elemento.html() + testo.charAt(i));
+                i++;
+                
+                // Rimetti il cursore
+                elemento.addClass('assia-typing-cursor');
+                
+                // Auto-scroll durante la digitazione
+                var container = $('.assistente-ia-messaggi');
+                container.scrollTop(container[0].scrollHeight);
+            } else {
+                clearInterval(intervallo);
+                // Rimuovi il cursore alla fine
+                elemento.removeClass('assia-typing-cursor');
+            }
+        }, velocita);
+    }
+
+    /* ============================================
+       FUNZIONI MESSAGGI
+       ============================================ */
+    function appendi_messaggio(ruolo, html, useTypewriter){
         var $b=$('#assistente-ia-messaggi'),
             cls=(ruolo==='utente')?'assia-msg-utente':'assia-msg-assistente';
-        $('<div/>',{class:'assia-messaggio '+cls}).html(html).appendTo($b);
-        $b.scrollTop($b.prop('scrollHeight'));
+        
+        var msgDiv = $('<div/>',{class:'assia-messaggio '+cls});
+        
+        if(ruolo === 'assistente' && useTypewriter !== false) {
+            // Usa effetto typewriter per l'assistente
+            msgDiv.appendTo($b);
+            assiaTypewriter(html, msgDiv);
+        } else {
+            // Mostra immediatamente per messaggi utente o quando specificato
+            msgDiv.html(html).appendTo($b);
+            $b.scrollTop($b.prop('scrollHeight'));
+        }
     }
 
     function render_preloader(){
@@ -36,7 +82,9 @@
         $('#assia-preloader').remove(); 
     }
 
-    // ✅ FIX v5.6.1: Gestione errori migliorata
+    /* ============================================
+       GESTIONE ERRORI
+       ============================================ */
     function assiaErrore(msg, dettagli){
         try{
             var box = $('#assistente-ia-messaggi'); 
@@ -49,7 +97,6 @@
             box.append(el);
             box.scrollTop(box.prop('scrollHeight'));
             
-            // Log dettagli in console per debug
             if (dettagli) {
                 console.error('Assistente IA - Dettagli errore:', dettagli);
             }
@@ -58,6 +105,9 @@
         }
     }
 
+    /* ============================================
+       RIIDRATAZIONE CHAT
+       ============================================ */
     function riidrata_chat(){
         $.post(AssistenteIA.ajax_url,{
             action:'assistente_ia_recupera_chat',
@@ -68,7 +118,7 @@
             var arr=resp.data.messaggi||[],
                 $b=$('#assistente-ia-messaggi');
             
-            // ✅ Salva l'avviso iniziale se presente
+            // Salva l'avviso iniziale se presente
             var avvisoIniziale = $b.find('.assia-avviso-iniziale').clone();
             
             $b.empty();
@@ -77,15 +127,17 @@
             if (arr.length === 0 && avvisoIniziale.length) {
                 $b.append(avvisoIniziale);
             } else {
-                // Altrimenti mostra i messaggi
+                // Mostra i messaggi senza typewriter (caricamento storico)
                 arr.forEach(function(r){ 
-                    appendi_messaggio(r.ruolo, r.testo); 
+                    appendi_messaggio(r.ruolo, r.testo, false); 
                 });
             }
         });
     }
 
-    // Funzione assiaCaricaStorico DENTRO il closure
+    /* ============================================
+       CARICA STORICO
+       ============================================ */
     function assiaCaricaStorico(){
         try{
             var hash = ottieni_o_crea_hash_sessione();
@@ -111,7 +163,7 @@
                     return; 
                 }
                 
-                // ✅ Salva l'avviso iniziale se presente
+                // Salva l'avviso iniziale se presente
                 var avvisoIniziale = box.find('.assia-avviso-iniziale').clone();
                 
                 box.empty();
@@ -122,10 +174,10 @@
                 if (messaggi.length === 0 && avvisoIniziale.length) {
                     box.append(avvisoIniziale);
                 } else {
-                    // Altrimenti mostra i messaggi
+                    // Mostra i messaggi senza typewriter
                     messaggi.forEach(function(m){
                         var ruolo = m.tipo === 'utente' ? 'utente' : 'assistente';
-                        appendi_messaggio(ruolo, m.testo);
+                        appendi_messaggio(ruolo, m.testo, false);
                     });
                 }
                 
@@ -134,7 +186,6 @@
             .fail(function(xhr, status, error){ 
                 console.error('Assistente IA - storico fail:', {xhr: xhr, status: status, error: error});
                 
-                // ✅ FIX v5.6.1: Messaggi di errore più specifici
                 var msg = 'Errore nel caricamento delle conversazioni precedenti.';
                 if (xhr.status === 403) {
                     msg = 'Accesso negato. Ricarica la pagina.';
@@ -146,61 +197,57 @@
                     msg = 'Richiesta scaduta. Controlla la connessione.';
                 }
                 
-                assiaErrore(msg, {xhr: xhr, status: status, error: error}); 
+                assiaErrore(msg);
             });
-        }catch(e){ 
-            console.error('Assistente IA - storico exception', e); 
-            assiaErrore('Errore imprevisto nel caricamento storico.', e);
+        }catch(e){
+            console.error('Assistente IA - caricaStorico exception:', e);
         }
     }
 
-    // Esponi globalmente solo se necessario per chiamate esterne
-    window.assiaCaricaStorico = assiaCaricaStorico;
-
-    /** ✅ FIX v5.6.1: Aggiunto throttling per prevenire invii multipli */
+    /* ============================================
+       FUNZIONE INVIO MESSAGGIO
+       ============================================ */
     function invia(){
-        // ✅ THROTTLING: Previene invii multipli
         if (invioInCorso) {
-            console.warn('Attendi la risposta precedente prima di inviare un nuovo messaggio');
             return;
         }
         
-        var t=$('#assistente-ia-input').val().trim();
-        if(!t) return;
+        var $input=$('#assistente-ia-input'), txt=$.trim($input.val());
+        if(!txt){ 
+            $input.focus(); 
+            return; 
+        }
         
-        invioInCorso = true; // ✅ Blocca invii multipli
+        invioInCorso = true;
+        $('#assistente-ia-invia').prop('disabled', true);
         
-        $('#assistente-ia-input').val('');
-        appendi_messaggio('utente',$('<div/>').text(t).html());
+        appendi_messaggio('utente', txt, false);
+        $input.val('');
         render_preloader();
         
-        $.post(AssistenteIA.ajax_url,{
-            action:'assistente_ia_chat',
-            messaggio:t,
+        $.post(AssistenteIA.ajax_url, {
+            action:'assistente_ia_invia',
+            nonce: AssistenteIA.nonce,
+            messaggio: txt,
             hash_sessione: ottieni_o_crea_hash_sessione(),
-            post_id: AssistenteIA.currentPost,
-            nonce: AssistenteIA.nonce
-        }, function(resp){
+            post_id: AssistenteIA.currentPost||0
+        })
+        .done(function(res){
             rimuovi_preloader();
-            invioInCorso = false; // ✅ Rilascia il lock
             
-            if(!resp||!resp.success){
-                var errMsg = 'Si è verificato un errore.';
-                if(resp && resp.data && resp.data.messaggio) {
-                    errMsg += ' ' + resp.data.messaggio;
-                }
-                assiaErrore(errMsg, resp);
-                return;
+            if(res && res.success && res.data && res.data.risposta_html){
+                // USA TYPEWRITER per la risposta AI
+                appendi_messaggio('assistente', res.data.risposta_html, true);
+            } else {
+                var errMsg = (res && res.data && res.data.messaggio) 
+                    ? res.data.messaggio 
+                    : 'Risposta non valida dal server.';
+                assiaErrore(errMsg);
             }
-            appendi_messaggio('assistente', resp.data.risposta_html);
         })
         .fail(function(xhr, status, error){
             rimuovi_preloader();
-            invioInCorso = false; // ✅ Rilascia anche in caso di errore
             
-            console.error('Assistente IA - invio fail:', {xhr: xhr, status: status, error: error});
-            
-            // ✅ FIX v5.6.1: Messaggi di errore più specifici basati sul tipo
             var msg = 'Errore di connessione. Riprova.';
             
             if (xhr.status === 403) {
@@ -220,23 +267,59 @@
             }
             
             assiaErrore(msg, {xhr: xhr, status: status, error: error});
+        })
+        .always(function(){
+            invioInCorso = false;
+            $('#assistente-ia-invia').prop('disabled', false);
+            $input.focus();
         });
     }
 
-    // UI eventi
-    $(document).on('click','#assistente-ia-bottone',function(){
-        $('#assistente-ia-popup').toggleClass('assia-nascosto'); 
-        if(!$('#assistente-ia-popup').hasClass('assia-nascosto')){ 
-            setTimeout(function(){ 
-                $('#assistente-ia-input').focus(); 
-            }, 100); 
-            // Carica storico quando si apre
-            assiaCaricaStorico();
+    /* ============================================
+       GESTIONE OVERLAY E POPUP
+       ============================================ */
+    function apriChat() {
+        $('#assistente-ia-popup').removeClass('assia-nascosto');
+        $('#assistente-ia-overlay').addClass('attivo');
+        
+        setTimeout(function(){ 
+            $('#assistente-ia-input').focus(); 
+        }, 350);
+        
+        assiaCaricaStorico();
+    }
+    
+    function chiudiChat() {
+        $('#assistente-ia-popup').addClass('assia-nascosto');
+        $('#assistente-ia-overlay').removeClass('attivo');
+    }
+
+    /* ============================================
+       EVENTI UI
+       ============================================ */
+    $(document).on('click','#assistente-ia-bottone', function(){
+        if($('#assistente-ia-popup').hasClass('assia-nascosto')){
+            apriChat();
+        } else {
+            chiudiChat();
         }
     });
     
-    $(document).on('click','.assistente-ia-chiudi',function(){
-        $('#assistente-ia-popup').addClass('assia-nascosto');
+    // Chiudi cliccando sull'overlay
+    $(document).on('click','#assistente-ia-overlay', function(){
+        chiudiChat();
+    });
+    
+    // Chiudi con il bottone X
+    $(document).on('click','.assistente-ia-chiudi', function(){
+        chiudiChat();
+    });
+    
+    // Chiudi con ESC
+    $(document).on('keydown', function(e){
+        if(e.key === 'Escape' && !$('#assistente-ia-popup').hasClass('assia-nascosto')){
+            chiudiChat();
+        }
     });
     
     $(document).on('click','#assistente-ia-invia', invia);
@@ -248,7 +331,9 @@
         }
     });
 
-    // All'avvio: riidrata chat se disponibile
+    /* ============================================
+       INIZIALIZZAZIONE
+       ============================================ */
     $(function(){ 
         riidrata_chat(); 
     });
